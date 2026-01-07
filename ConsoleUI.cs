@@ -29,8 +29,8 @@ public class ConsoleUI : IDisposable
         _fileWatcher = fileWatcher;
         _config = config;
 
-        // Subscribe to controller events
-        _controller.OnOutput += AddOutputLine;
+        // Subscribe to controller events (escape AI output to prevent markup parsing)
+        _controller.OnOutput += line => AddOutputLine(Markup.Escape(line));
         _controller.OnError += line => AddOutputLine($"[red]{Markup.Escape(line)}[/]");
         _controller.OnIterationStart += iter => AddOutputLine($"[blue]>>> Starting iteration {iter}[/]");
         _controller.OnIterationComplete += (iter, result) =>
@@ -162,7 +162,7 @@ public class ConsoleUI : IDisposable
             : "[dim]No implementation plan found[/]";
 
         return new Panel(new Markup(content))
-            .Header($"[bold]{_config.PlanFile}[/]")
+            .Header($"[bold]{Markup.Escape(_config.PlanFile)}[/]")
             .Border(BoxBorder.Rounded);
     }
 
