@@ -83,27 +83,15 @@ public class AIProcess : IDisposable
 
         if (!_providerConfig.UsesStdin)
         {
-            // For long prompts, use a temp file to avoid command line length limits
-            if (_providerConfig.UsesTempFile || prompt.Length > 4000)
-            {
-                var tempFile = Path.GetTempFileName();
-                await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
-                _tempPromptFile = tempFile;
+            // Always use a temp file for prompts - much more reliable than command line escaping
+            var tempFile = Path.GetTempFileName();
+            await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
+            _tempPromptFile = tempFile;
 
-                // Use shell to read from temp file
-                var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} \"$(cat '{tempFile}')\"";
-                arguments = $"-c \"{EscapeArgument(fullCmd)}\"";
-                useShell = true;
-            }
-            else if (_providerConfig.PromptArgument is not null)
-            {
-                arguments += $" {_providerConfig.PromptArgument} \"{EscapeArgument(prompt)}\"";
-            }
-            else
-            {
-                // Positional argument (Claude, Codex style)
-                arguments += $" \"{EscapeArgument(prompt)}\"";
-            }
+            // Use shell to read from temp file and pass to CLI
+            var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} \"$(cat '{tempFile}')\"";
+            arguments = $"-c '{fullCmd}'";
+            useShell = true;
         }
 
         var psi = new ProcessStartInfo

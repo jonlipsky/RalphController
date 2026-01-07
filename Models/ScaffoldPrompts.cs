@@ -7,9 +7,14 @@ namespace RalphController.Models;
 public static class ScaffoldPrompts
 {
     /// <summary>
-    /// Prompt to generate agents.md - the self-improvement file for the agent
+    /// Generates the prompt for creating agents.md
     /// </summary>
-    public const string AgentsMd = """
+    public static string GetAgentsMdPrompt(string projectContext) => $"""
+        You are setting up a new project for autonomous AI development.
+
+        PROJECT CONTEXT:
+        {projectContext}
+
         Create an agents.md file for this project.
 
         This file is the agent's self-improvement notes. When the agent learns something new about:
@@ -20,18 +25,24 @@ public static class ScaffoldPrompts
         The agent should update this file to help future iterations.
 
         Requirements:
-        1. Start with a brief project description placeholder
+        1. Start with a brief project description based on the context above
         2. Include sections for: Build Commands, Test Commands, Common Issues, Learnings
-        3. Keep it brief - this file is read every loop iteration
-        4. Use markdown format
+        3. Pre-fill any build/test commands you can infer from the project type
+        4. Keep it brief - this file is read every loop iteration
+        5. Use markdown format
 
         Write the file to agents.md
         """;
 
     /// <summary>
-    /// Prompt to generate the specs directory structure
+    /// Generates the prompt for creating the specs directory
     /// </summary>
-    public const string SpecsDirectory = """
+    public static string GetSpecsDirectoryPrompt(string projectContext) => $"""
+        You are setting up a new project for autonomous AI development.
+
+        PROJECT CONTEXT:
+        {projectContext}
+
         Create a specs/ directory with initial specification files.
 
         Specs are the source of truth for what needs to be built. Each spec file describes:
@@ -39,18 +50,24 @@ public static class ScaffoldPrompts
         - Technical requirements
         - Acceptance criteria
 
-        Create:
-        1. specs/README.md - explaining how to write specs
-        2. specs/example.md - a template spec file
+        Based on the project context, create:
+        1. specs/README.md - explaining how to write specs for this project
+        2. specs/overview.md - a high-level spec describing the project goals and architecture
+        3. Any additional spec files for major features you can identify
 
         The specs should be detailed enough that an agent can implement from them,
         but concise enough to fit in context. Follow the principle: specs + stdlib = generate.
         """;
 
     /// <summary>
-    /// Prompt to generate the initial prompt.md
+    /// Generates the prompt for creating prompt.md
     /// </summary>
-    public const string PromptMd = """
+    public static string GetPromptMdPrompt(string projectContext) => $"""
+        You are setting up a new project for autonomous AI development.
+
+        PROJECT CONTEXT:
+        {projectContext}
+
         Create a prompt.md file - the main instruction file for the Ralph loop.
 
         This prompt is read every iteration. It should be CONCISE (under 200 words is ideal).
@@ -72,13 +89,20 @@ public static class ScaffoldPrompts
         - "After implementing, run tests for that unit"
         - "Update the plan with learnings"
 
+        Customize the prompt for this specific project type based on the context.
+
         Write the file to prompt.md
         """;
 
     /// <summary>
-    /// Prompt to generate the implementation plan
+    /// Generates the prompt for creating implementation_plan.md
     /// </summary>
-    public const string ImplementationPlan = """
+    public static string GetImplementationPlanPrompt(string projectContext) => $"""
+        You are setting up a new project for autonomous AI development.
+
+        PROJECT CONTEXT:
+        {projectContext}
+
         Create an implementation_plan.md file - the TODO list for the project.
 
         This file tracks:
@@ -93,14 +117,15 @@ public static class ScaffoldPrompts
         - Add new items discovered during work
         - Note blockers or issues
 
-        Create an initial plan with:
-        1. A "Completed" section (empty)
+        Based on the project context, create an initial plan with:
+        1. A "Completed" section (empty or with any existing work)
         2. A "In Progress" section (empty)
-        3. A "Pending" section with placeholder tasks
+        3. A "Pending" section with actual tasks derived from the project description
         4. A "Bugs/Issues" section (empty)
         5. A "Notes" section for learnings
 
         Keep items brief - one line each. This file is the agent's memory across iterations.
+        Make the pending tasks specific and actionable based on what you know about the project.
 
         Write the file to implementation_plan.md
         """;

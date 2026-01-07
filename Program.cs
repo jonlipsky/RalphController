@@ -105,6 +105,35 @@ if (!structure.IsComplete)
     switch (action)
     {
         case "Generate files using AI":
+            // Ask for project description - we can't generate without context
+            AnsiConsole.MarkupLine("\n[yellow]To generate project files, I need to understand your project.[/]");
+            AnsiConsole.MarkupLine("[dim]You can provide a description, or path to a document (README, spec, etc.)[/]\n");
+
+            var projectContext = AnsiConsole.Prompt(
+                new TextPrompt<string>("[yellow]Describe your project (or enter path to a doc):[/]")
+                    .AllowEmpty());
+
+            if (string.IsNullOrWhiteSpace(projectContext))
+            {
+                AnsiConsole.MarkupLine("[red]No project description provided. Using default templates instead.[/]");
+                await scaffolder.CreateDefaultFilesAsync();
+                AnsiConsole.MarkupLine("[green]Created default template files[/]");
+                break;
+            }
+
+            // Check if it's a file path
+            var contextPath = Path.IsPathRooted(projectContext)
+                ? projectContext
+                : Path.Combine(targetDir, projectContext);
+
+            if (File.Exists(contextPath))
+            {
+                AnsiConsole.MarkupLine($"[dim]Reading context from {contextPath}...[/]");
+                projectContext = await File.ReadAllTextAsync(contextPath);
+            }
+
+            scaffolder.ProjectContext = projectContext;
+
             AnsiConsole.MarkupLine("\n[blue]Generating project files using AI...[/]");
 
             scaffolder.OnScaffoldStart += file =>
@@ -116,6 +145,8 @@ if (!structure.IsComplete)
                 else
                     AnsiConsole.MarkupLine($"[red]Failed to create {file}[/]");
             };
+            scaffolder.OnOutput += line =>
+                AnsiConsole.MarkupLine($"[dim]{Markup.Escape(line)}[/]");
 
             await scaffolder.ScaffoldMissingAsync();
             break;

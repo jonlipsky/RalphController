@@ -36,17 +36,16 @@ public record AIProviderConfig
         ExecutablePath = executablePath ?? "claude",
         // -p for print mode (non-interactive), --dangerously-skip-permissions for auto-approve
         Arguments = "-p --dangerously-skip-permissions",
-        UsesStdin = false,  // Pass prompt as argument (more reliable)
-        PromptArgument = null  // Claude takes prompt as positional argument after options
+        UsesStdin = true  // Pipe prompt via stdin - more reliable for multi-line content
     };
 
     public static AIProviderConfig ForCodex(string? executablePath = null) => new()
     {
         Provider = AIProvider.Codex,
         ExecutablePath = executablePath ?? "codex",
-        // --yolo for non-interactive auto-approve mode
-        Arguments = "--yolo",
-        UsesStdin = false,
-        PromptArgument = null  // Codex takes prompt as positional argument
+        // exec for non-interactive mode, - to read prompt from stdin
+        // --dangerously-bypass-approvals-and-sandbox for full auto mode
+        Arguments = "exec --dangerously-bypass-approvals-and-sandbox -",
+        UsesStdin = true  // Codex exec reads from stdin when using "-"
     };
 }

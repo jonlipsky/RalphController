@@ -18,6 +18,12 @@ public class ProjectScaffolder
     /// <summary>Fired when output is received from AI</summary>
     public event Action<string>? OnOutput;
 
+    /// <summary>
+    /// Project description/context provided by the user.
+    /// This is included in all scaffolding prompts so the AI understands the project.
+    /// </summary>
+    public string? ProjectContext { get; set; }
+
     public ProjectScaffolder(RalphConfig config)
     {
         _config = config;
@@ -43,6 +49,9 @@ public class ProjectScaffolder
             return true;
         }
 
+        // Ensure we have project context
+        var context = ProjectContext ?? "No project description provided. Create generic templates.";
+
         var success = true;
 
         // Create specs directory first (doesn't need AI)
@@ -54,25 +63,25 @@ public class ProjectScaffolder
         // Generate agents.md
         if (!structure.HasAgentsMd)
         {
-            success &= await ScaffoldFileAsync("agents.md", ScaffoldPrompts.AgentsMd, cancellationToken);
+            success &= await ScaffoldFileAsync("agents.md", ScaffoldPrompts.GetAgentsMdPrompt(context), cancellationToken);
         }
 
         // Generate specs files
         if (!structure.HasSpecsDirectory || !Directory.EnumerateFiles(_config.SpecsDirectoryPath, "*.md").Any())
         {
-            success &= await ScaffoldFileAsync("specs/", ScaffoldPrompts.SpecsDirectory, cancellationToken);
+            success &= await ScaffoldFileAsync("specs/", ScaffoldPrompts.GetSpecsDirectoryPrompt(context), cancellationToken);
         }
 
         // Generate prompt.md
         if (!structure.HasPromptMd)
         {
-            success &= await ScaffoldFileAsync("prompt.md", ScaffoldPrompts.PromptMd, cancellationToken);
+            success &= await ScaffoldFileAsync("prompt.md", ScaffoldPrompts.GetPromptMdPrompt(context), cancellationToken);
         }
 
         // Generate implementation_plan.md
         if (!structure.HasImplementationPlan)
         {
-            success &= await ScaffoldFileAsync("implementation_plan.md", ScaffoldPrompts.ImplementationPlan, cancellationToken);
+            success &= await ScaffoldFileAsync("implementation_plan.md", ScaffoldPrompts.GetImplementationPlanPrompt(context), cancellationToken);
         }
 
         return success;
@@ -87,15 +96,27 @@ public class ProjectScaffolder
 
         var process = new AIProcess(_config);
         process.OnOutput += line => OnOutput?.Invoke(line);
+        process.OnError += line => OnOutput?.Invoke($"[ERROR] {line}");
 
         try
         {
             var result = await process.RunAsync(prompt, cancellationToken);
+
+            if (!result.Success)
+            {
+                OnOutput?.Invoke($"[FAILED] Exit code: {result.ExitCode}");
+                if (!string.IsNullOrWhiteSpace(result.Error))
+                {
+                    OnOutput?.Invoke($"[STDERR] {result.Error}");
+                }
+            }
+
             OnScaffoldComplete?.Invoke(fileName, result.Success);
             return result.Success;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            OnOutput?.Invoke($"[EXCEPTION] {ex.Message}");
             OnScaffoldComplete?.Invoke(fileName, false);
             return false;
         }
