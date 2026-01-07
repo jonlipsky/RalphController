@@ -83,15 +83,17 @@ public class AIProcess : IDisposable
 
         if (!_providerConfig.UsesStdin)
         {
-            // Always use a temp file for prompts - much more reliable than command line escaping
+            // Write prompt to temp file
             var tempFile = Path.GetTempFileName();
             await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
             _tempPromptFile = tempFile;
 
-            // Use shell to read from temp file and pass to CLI
-            var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} \"$(cat '{tempFile}')\"";
-            arguments = $"-c '{fullCmd}'";
+            // Use shell with input redirection from temp file
+            // This is more reliable than command substitution for multi-line content
+            var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} < '{tempFile}'";
+            arguments = $"-c \"{fullCmd}\"";
             useShell = true;
+
         }
 
         var psi = new ProcessStartInfo

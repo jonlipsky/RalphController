@@ -17,6 +17,8 @@ public class ConsoleUI : IDisposable
     private CancellationTokenSource? _uiCts;
     private Task? _inputTask;
     private bool _disposed;
+    private int _lastConsoleWidth;
+    private int _lastConsoleHeight;
 
     /// <summary>
     /// Whether to automatically start the loop when RunAsync is called
@@ -47,6 +49,10 @@ public class ConsoleUI : IDisposable
     {
         _uiCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // Track initial console size
+        _lastConsoleWidth = Console.WindowWidth;
+        _lastConsoleHeight = Console.WindowHeight;
+
         // Start input handler on background thread
         _inputTask = Task.Run(() => HandleInputAsync(_uiCts.Token), _uiCts.Token);
 
@@ -65,6 +71,16 @@ public class ConsoleUI : IDisposable
             {
                 while (!_uiCts.Token.IsCancellationRequested)
                 {
+                    // Check for console resize
+                    if (Console.WindowWidth != _lastConsoleWidth || Console.WindowHeight != _lastConsoleHeight)
+                    {
+                        _lastConsoleWidth = Console.WindowWidth;
+                        _lastConsoleHeight = Console.WindowHeight;
+
+                        // Clear and redraw on resize
+                        AnsiConsole.Clear();
+                    }
+
                     ctx.UpdateTarget(BuildLayout());
                     ctx.Refresh();
                     await Task.Delay(100, _uiCts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
@@ -148,10 +164,21 @@ public class ConsoleUI : IDisposable
             ? string.Join("\n", lines)
             : "[dim]Waiting for output...[/]";
 
-        return new Panel(new Markup(content))
-            .Header("[bold]Output[/]")
-            .Border(BoxBorder.Rounded)
-            .Expand();
+        try
+        {
+            return new Panel(new Markup(content))
+                .Header("[bold]Output[/]")
+                .Border(BoxBorder.Rounded)
+                .Expand();
+        }
+        catch
+        {
+            // If markup parsing fails, show as plain text
+            return new Panel(new Text(content))
+                .Header("[bold]Output[/]")
+                .Border(BoxBorder.Rounded)
+                .Expand();
+        }
     }
 
     private Panel BuildPlanPanel()
@@ -270,6 +297,13 @@ public class ConsoleUI : IDisposable
 
     private void AddOutputLine(string line)
     {
+        // Truncate long lines to prevent layout issues
+        var maxLineLength = Math.Max(40, Console.WindowWidth - 10);
+        if (line.Length > maxLineLength)
+        {
+            line = line[..maxLineLength] + "...";
+        }
+
         _outputLines.Enqueue(line);
 
         // Keep only last N lines

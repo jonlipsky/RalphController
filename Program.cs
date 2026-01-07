@@ -1,9 +1,190 @@
+using System.Diagnostics;
 using RalphController;
 using RalphController.Models;
 using Spectre.Console;
 
+// Check for test modes
+if (args.Contains("--single-run"))
+{
+    // Run one iteration without TUI to test the full loop
+    AnsiConsole.MarkupLine("[yellow]Running single iteration (no TUI)...[/]\n");
+
+    var singleDir = args.FirstOrDefault(a => !a.StartsWith("-")) ?? Directory.GetCurrentDirectory();
+    if (!Directory.Exists(singleDir)) singleDir = Directory.GetCurrentDirectory();
+
+    var singleConfig = new RalphConfig
+    {
+        TargetDirectory = singleDir,
+        Provider = AIProvider.Claude,
+        ProviderConfig = AIProviderConfig.ForClaude(),
+        MaxIterations = 1
+    };
+
+    using var singleController = new LoopController(singleConfig);
+
+    singleController.OnOutput += line =>
+    {
+        var escaped = line.Replace("[", "[[").Replace("]", "]]");
+        AnsiConsole.MarkupLine($"[green]OUT:[/] {escaped}");
+    };
+    singleController.OnError += line =>
+    {
+        var escaped = line.Replace("[", "[[").Replace("]", "]]");
+        AnsiConsole.MarkupLine($"[red]ERR:[/] {escaped}");
+    };
+    singleController.OnIterationStart += iter =>
+    {
+        AnsiConsole.MarkupLine($"[blue]>>> Starting iteration {iter}[/]");
+    };
+    singleController.OnIterationComplete += (iter, result) =>
+    {
+        AnsiConsole.MarkupLine($"[blue]<<< Iteration {iter} complete: {(result.Success ? "SUCCESS" : "FAILED")}[/]");
+    };
+
+    AnsiConsole.MarkupLine($"[dim]Directory: {singleDir}[/]");
+    AnsiConsole.MarkupLine($"[dim]Prompt: {singleConfig.PromptFilePath}[/]\n");
+
+    await singleController.StartAsync();
+
+    AnsiConsole.MarkupLine("\n[green]Done![/]");
+    return 0;
+}
+
+if (args.Contains("--test-aiprocess"))
+{
+    AnsiConsole.MarkupLine("[yellow]Testing AIProcess class...[/]\n");
+
+    var testConfig = new RalphConfig
+    {
+        TargetDirectory = Directory.GetCurrentDirectory(),
+        Provider = AIProvider.Claude,
+        ProviderConfig = AIProviderConfig.ForClaude()
+    };
+
+    using var aiProcess = new AIProcess(testConfig);
+
+    var outputReceived = false;
+    aiProcess.OnOutput += line =>
+    {
+        outputReceived = true;
+        var escaped = line.Replace("[", "[[").Replace("]", "]]");
+        AnsiConsole.MarkupLine($"[green]OUTPUT:[/] {escaped}");
+    };
+    aiProcess.OnError += line =>
+    {
+        var escaped = line.Replace("[", "[[").Replace("]", "]]");
+        AnsiConsole.MarkupLine($"[red]ERROR:[/] {escaped}");
+    };
+    aiProcess.OnExit += code =>
+    {
+        AnsiConsole.MarkupLine($"[dim]EXIT:[/] {code}");
+    };
+
+    AnsiConsole.MarkupLine("[blue]Running AIProcess.RunAsync('Say hello')...[/]\n");
+    var result = await aiProcess.RunAsync("Say hello");
+
+    AnsiConsole.MarkupLine($"\n[yellow]Result:[/]");
+    AnsiConsole.MarkupLine($"  Success: {result.Success}");
+    AnsiConsole.MarkupLine($"  Exit Code: {result.ExitCode}");
+    AnsiConsole.MarkupLine($"  Output length: {result.Output.Length}");
+    AnsiConsole.MarkupLine($"  Error length: {result.Error.Length}");
+    AnsiConsole.MarkupLine($"  Output received via events: {outputReceived}");
+
+    if (result.Output.Length > 0)
+    {
+        AnsiConsole.MarkupLine($"\n[yellow]Output content:[/]");
+        var escaped = result.Output.Replace("[", "[[").Replace("]", "]]");
+        AnsiConsole.MarkupLine(escaped);
+    }
+
+    return 0;
+}
+
+if (args.Contains("--test-output"))
+{
+    AnsiConsole.MarkupLine("[yellow]Testing process output capture...[/]\n");
+
+    // Test 1: Simple echo
+    AnsiConsole.MarkupLine("[blue]Test 1: Simple echo command[/]");
+    var psi = new ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = "-c \"echo 'Hello from bash'\"",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+
+    using var process = new Process { StartInfo = psi };
+    process.OutputDataReceived += (_, e) =>
+    {
+        if (e.Data != null)
+            AnsiConsole.MarkupLine($"  [green]STDOUT:[/] {e.Data}");
+    };
+    process.ErrorDataReceived += (_, e) =>
+    {
+        if (e.Data != null)
+            AnsiConsole.MarkupLine($"  [red]STDERR:[/] {e.Data}");
+    };
+    process.Start();
+    process.BeginOutputReadLine();
+    process.BeginErrorReadLine();
+    await process.WaitForExitAsync();
+    AnsiConsole.MarkupLine($"  [dim]Exit code: {process.ExitCode}[/]\n");
+
+    // Test 2: Claude command
+    AnsiConsole.MarkupLine("[blue]Test 2: Claude command with temp file[/]");
+    var tempFile = Path.GetTempFileName();
+    await File.WriteAllTextAsync(tempFile, "Say 'Hello, World!' and nothing else.");
+
+    var psi2 = new ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = $"-c \"claude -p --dangerously-skip-permissions < '{tempFile}'\"",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+
+    var outputLines = 0;
+    var errorLines = 0;
+
+    using var process2 = new Process { StartInfo = psi2 };
+    process2.OutputDataReceived += (_, e) =>
+    {
+        if (e.Data != null)
+        {
+            outputLines++;
+            var escaped = e.Data.Replace("[", "[[").Replace("]", "]]");
+            AnsiConsole.MarkupLine($"  [green]STDOUT:[/] {escaped}");
+        }
+    };
+    process2.ErrorDataReceived += (_, e) =>
+    {
+        if (e.Data != null)
+        {
+            errorLines++;
+            var escaped = e.Data.Replace("[", "[[").Replace("]", "]]");
+            AnsiConsole.MarkupLine($"  [red]STDERR:[/] {escaped}");
+        }
+    };
+    process2.Start();
+    process2.BeginOutputReadLine();
+    process2.BeginErrorReadLine();
+    await process2.WaitForExitAsync();
+    await Task.Delay(100); // Allow async events to complete
+    File.Delete(tempFile);
+
+    AnsiConsole.MarkupLine($"  [dim]Exit code: {process2.ExitCode}, stdout lines: {outputLines}, stderr lines: {errorLines}[/]\n");
+
+    AnsiConsole.MarkupLine("[green]Test complete![/]");
+    return 0;
+}
+
 // Parse command line arguments
-var targetDir = args.Length > 0 ? args[0] : null;
+var targetDir = args.Length > 0 && !args[0].StartsWith("-") ? args[0] : null;
 var provider = AIProvider.Claude;
 
 // Check for provider flag

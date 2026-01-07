@@ -35,8 +35,9 @@ public record AIProviderConfig
         Provider = AIProvider.Claude,
         ExecutablePath = executablePath ?? "claude",
         // -p for print mode (non-interactive), --dangerously-skip-permissions for auto-approve
+        // Use stdin for real-time streaming output
         Arguments = "-p --dangerously-skip-permissions",
-        UsesStdin = true  // Pipe prompt via stdin - more reliable for multi-line content
+        UsesStdin = true
     };
 
     public static AIProviderConfig ForCodex(string? executablePath = null) => new()
