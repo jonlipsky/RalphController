@@ -33,10 +33,9 @@ public record AIProviderConfig
     public static AIProviderConfig ForClaude(string? executablePath = null) => new()
     {
         Provider = AIProvider.Claude,
-        ExecutablePath = executablePath ?? "claude",
-        // -p for print mode (non-interactive), --dangerously-skip-permissions for auto-approve
-        // Use stdin for real-time streaming output
-        Arguments = "-p --dangerously-skip-permissions",
+        // Use stdbuf to force line-buffered output for real-time streaming
+        ExecutablePath = "stdbuf",
+        Arguments = $"-oL {executablePath ?? "claude"} -p --dangerously-skip-permissions",
         UsesStdin = true
     };
 

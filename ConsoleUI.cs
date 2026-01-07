@@ -13,7 +13,7 @@ public class ConsoleUI : IDisposable
     private readonly FileWatcher _fileWatcher;
     private readonly RalphConfig _config;
     private readonly ConcurrentQueue<string> _outputLines = new();
-    private readonly int _maxOutputLines = 20;
+    private readonly int _maxOutputLines = 30;
     private CancellationTokenSource? _uiCts;
     private Task? _inputTask;
     private bool _disposed;
@@ -102,8 +102,8 @@ public class ConsoleUI : IDisposable
             .SplitRows(
                 new Layout("Header").Size(3),
                 new Layout("Main").SplitRows(
-                    new Layout("Output").Ratio(3),
-                    new Layout("Plan").Size(8)
+                    new Layout("Output").Ratio(4),
+                    new Layout("Plan").Size(6)
                 ),
                 new Layout("Footer").Size(3)
             );
@@ -183,7 +183,7 @@ public class ConsoleUI : IDisposable
 
     private Panel BuildPlanPanel()
     {
-        var planLines = _fileWatcher.ReadPlanLinesAsync(6).GetAwaiter().GetResult();
+        var planLines = _fileWatcher.ReadPlanLinesAsync(4).GetAwaiter().GetResult();
         var content = planLines.Length > 0
             ? string.Join("\n", planLines.Select(Markup.Escape))
             : "[dim]No implementation plan found[/]";
@@ -297,8 +297,15 @@ public class ConsoleUI : IDisposable
 
     private void AddOutputLine(string line)
     {
+        // Skip empty lines to save space
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        // Remove control characters that can mess up the layout
+        line = new string(line.Where(c => !char.IsControl(c) || c == ' ').ToArray());
+
         // Truncate long lines to prevent layout issues
-        var maxLineLength = Math.Max(40, Console.WindowWidth - 10);
+        var maxLineLength = Math.Max(40, Console.WindowWidth - 15);
         if (line.Length > maxLineLength)
         {
             line = line[..maxLineLength] + "...";
