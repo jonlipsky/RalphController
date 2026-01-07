@@ -84,19 +84,33 @@ public class AIProcess : IDisposable
         var arguments = _providerConfig.Arguments;
         var useShell = false;
 
-        if (!_providerConfig.UsesStdin)
+        string? scriptFile = null;
+        if (_providerConfig.UsesPromptArgument)
         {
-            // Write prompt to temp file
+            // Write prompt to temp file and create a shell script to execute
+            var tempFile = Path.GetTempFileName();
+            await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
+            _tempPromptFile = tempFile;
+
+            // Create a temp script file to avoid quoting issues
+            scriptFile = Path.GetTempFileName() + ".sh";
+            var scriptContent = $"#!/bin/bash\n{_providerConfig.ExecutablePath} {arguments} \"$(cat '{tempFile}')\"";
+            await File.WriteAllTextAsync(scriptFile, scriptContent, cancellationToken);
+
+            arguments = scriptFile;
+            useShell = true;
+        }
+        else if (!_providerConfig.UsesStdin)
+        {
+            // Write prompt to temp file and use shell input redirection
             var tempFile = Path.GetTempFileName();
             await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
             _tempPromptFile = tempFile;
 
             // Use shell with input redirection from temp file
-            // This is more reliable than command substitution for multi-line content
             var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} < '{tempFile}'";
             arguments = $"-c \"{fullCmd}\"";
             useShell = true;
-
         }
 
         var psi = new ProcessStartInfo

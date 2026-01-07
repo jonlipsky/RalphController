@@ -14,6 +14,9 @@ public class ProjectSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AIProvider? Provider { get; set; }
 
+    /// <summary>Model to use for Copilot (e.g., gpt-5, claude-sonnet-4)</summary>
+    public string? CopilotModel { get; set; }
+
     /// <summary>Custom executable path for the provider (optional)</summary>
     public string? ExecutablePath { get; set; }
 

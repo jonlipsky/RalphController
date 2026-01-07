@@ -30,8 +30,11 @@ public record AIProviderConfig
     /// <summary>Argument prefix for prompt (if not using stdin)</summary>
     public string? PromptArgument { get; init; }
 
-    /// <summary>Whether to write prompt to a temp file and reference it</summary>
+    /// <summary>Whether to write prompt to a temp file and use shell redirection</summary>
     public bool UsesTempFile { get; init; } = false;
+
+    /// <summary>Whether to pass the prompt as a direct command line argument (quoted)</summary>
+    public bool UsesPromptArgument { get; init; } = false;
 
     /// <summary>Whether output is in stream-json format that needs parsing</summary>
     public bool UsesStreamJson { get; init; } = false;
@@ -56,14 +59,15 @@ public record AIProviderConfig
         UsesStdin = true  // Codex exec reads from stdin when using "-"
     };
 
-    public static AIProviderConfig ForCopilot(string? executablePath = null) => new()
+    public static AIProviderConfig ForCopilot(string? executablePath = null, string? model = null) => new()
     {
         Provider = AIProvider.Copilot,
         ExecutablePath = executablePath ?? "copilot",
         // -p for programmatic mode (non-interactive)
         // --allow-all-tools for autonomous execution without approval prompts
-        Arguments = "--allow-all-tools -p",
-        UsesStdin = false,  // Copilot takes prompt as argument after -p
-        UsesTempFile = true // Use temp file for multi-line prompts
+        // --model to specify which model (default: gpt-5)
+        Arguments = $"--allow-all-tools --model {model ?? "gpt-5"} -p",
+        UsesStdin = false,
+        UsesPromptArgument = true  // Prompt is passed as quoted argument after -p
     };
 }

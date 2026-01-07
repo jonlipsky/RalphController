@@ -67,13 +67,28 @@ dotnet run -- /path/to/existing-project
 
 ```bash
 # Install from local source
-dotnet pack
+dotnet pack -o ./nupkg
 dotnet tool install --global --add-source ./nupkg RalphController
 
 # Now use it from anywhere
 ralph                           # Run in current directory
 ralph /path/to/project          # Run in specified directory
 ralph --copilot                 # Use GitHub Copilot
+```
+
+### Updating the Global Tool
+
+```bash
+# After making changes, rebuild and update
+dotnet pack -o ./nupkg
+dotnet tool uninstall --global RalphController
+dotnet tool install --global --add-source ./nupkg RalphController
+```
+
+### Uninstalling
+
+```bash
+dotnet tool uninstall --global RalphController
 ```
 
 ### From Source

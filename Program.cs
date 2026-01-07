@@ -221,6 +221,8 @@ AIProvider? providerFromArgs = null;
 string? initSpec = null;
 var initMode = false;
 
+string? modelFromArgs = null;
+
 // Check for flags
 for (int i = 0; i < args.Length; i++)
 {
@@ -233,6 +235,11 @@ for (int i = 0; i < args.Length; i++)
             "copilot" => AIProvider.Copilot,
             _ => null
         };
+    }
+    else if (args[i] == "--model" && i + 1 < args.Length)
+    {
+        modelFromArgs = args[i + 1];
+        i++;
     }
     else if (args[i] == "--codex")
     {
@@ -311,18 +318,57 @@ else
 
 AnsiConsole.MarkupLine($"[green]Provider:[/] {provider}");
 
+// For Copilot, handle model selection
+string? copilotModel = null;
+if (provider == AIProvider.Copilot)
+{
+    if (!string.IsNullOrEmpty(modelFromArgs))
+    {
+        // Use command line argument
+        copilotModel = modelFromArgs;
+        projectSettings.CopilotModel = copilotModel;
+    }
+    else if (!string.IsNullOrEmpty(projectSettings.CopilotModel))
+    {
+        // Use saved model
+        copilotModel = projectSettings.CopilotModel;
+        AnsiConsole.MarkupLine($"[dim]Using saved model: {copilotModel}[/]");
+    }
+    else
+    {
+        // Prompt for model
+        copilotModel = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Select Copilot model:[/]")
+                .AddChoices(
+                    "gpt-5",
+                    "gpt-5-mini",
+                    "gpt-5.1",
+                    "gpt-5.1-codex",
+                    "gpt-5.1-codex-mini",
+                    "gpt-5.2",
+                    "claude-sonnet-4",
+                    "claude-sonnet-4.5",
+                    "claude-opus-4.5"));
+
+        projectSettings.CopilotModel = copilotModel;
+    }
+
+    AnsiConsole.MarkupLine($"[green]Model:[/] {copilotModel}");
+}
+
 // Save provider to project settings if it changed or was newly selected
 if (providerWasSelected || (providerFromArgs.HasValue && providerFromArgs != savedProvider))
 {
     projectSettings.Provider = provider;
-    projectSettings.Save(targetDir);
 }
+projectSettings.Save(targetDir);
 
 // Create configuration
 var providerConfig = provider switch
 {
     AIProvider.Codex => AIProviderConfig.ForCodex(),
-    AIProvider.Copilot => AIProviderConfig.ForCopilot(),
+    AIProvider.Copilot => AIProviderConfig.ForCopilot(model: copilotModel),
     _ => AIProviderConfig.ForClaude()
 };
 
