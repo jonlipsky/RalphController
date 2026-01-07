@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using RalphController.Models;
 
 namespace RalphController;
@@ -14,6 +15,8 @@ public class AIProcess : IDisposable
     private readonly AIProviderConfig _providerConfig;
     private readonly StringBuilder _outputBuffer = new();
     private readonly StringBuilder _errorBuffer = new();
+    private readonly StringBuilder _streamingTextBuffer = new();
+    private readonly StringBuilder _lineBuffer = new();
     private readonly object _lock = new();
     private string? _tempPromptFile;
     private bool _disposed;
@@ -116,8 +119,43 @@ public class AIProcess : IDisposable
             {
                 if (e.Data is not null)
                 {
-                    lock (_lock) _outputBuffer.AppendLine(e.Data);
-                    OnOutput?.Invoke(e.Data);
+                    if (_providerConfig.UsesStreamJson)
+                    {
+                        // Parse stream-json format to extract text content
+                        var text = ParseStreamJsonLine(e.Data);
+                        if (text != null)
+                        {
+                            lock (_lock)
+                            {
+                                _streamingTextBuffer.Append(text);
+                                _outputBuffer.Append(text);
+                                _lineBuffer.Append(text);
+
+                                // Emit complete lines as they become available
+                                var content = _lineBuffer.ToString();
+                                var lastNewline = content.LastIndexOf('\n');
+                                if (lastNewline >= 0)
+                                {
+                                    // Extract and emit complete lines
+                                    var completeLines = content.Substring(0, lastNewline + 1);
+                                    _lineBuffer.Clear();
+                                    _lineBuffer.Append(content.Substring(lastNewline + 1));
+
+                                    // Emit each complete line
+                                    foreach (var line in completeLines.Split('\n', StringSplitOptions.None))
+                                    {
+                                        if (!string.IsNullOrEmpty(line))
+                                            OnOutput?.Invoke(line);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        lock (_lock) _outputBuffer.AppendLine(e.Data);
+                        OnOutput?.Invoke(e.Data);
+                    }
                 }
             };
 
@@ -133,6 +171,18 @@ public class AIProcess : IDisposable
             _process.EnableRaisingEvents = true;
             _process.Exited += (_, _) =>
             {
+                // Flush any remaining buffered text
+                if (_providerConfig.UsesStreamJson)
+                {
+                    lock (_lock)
+                    {
+                        if (_lineBuffer.Length > 0)
+                        {
+                            OnOutput?.Invoke(_lineBuffer.ToString());
+                            _lineBuffer.Clear();
+                        }
+                    }
+                }
                 OnExit?.Invoke(_process.ExitCode);
             };
 
@@ -161,6 +211,45 @@ public class AIProcess : IDisposable
     private static string EscapeArgument(string arg)
     {
         return arg.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    /// <summary>
+    /// Parse a line of stream-json output to extract text content
+    /// </summary>
+    private static string? ParseStreamJsonLine(string line)
+    {
+        try
+        {
+            // Skip empty lines or non-JSON
+            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("{"))
+                return null;
+
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+
+            // Check for content_block_delta with text_delta
+            if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "stream_event")
+            {
+                if (root.TryGetProperty("event", out var eventEl))
+                {
+                    if (eventEl.TryGetProperty("type", out var eventTypeEl) &&
+                        eventTypeEl.GetString() == "content_block_delta")
+                    {
+                        if (eventEl.TryGetProperty("delta", out var deltaEl) &&
+                            deltaEl.TryGetProperty("text", out var textEl))
+                        {
+                            return textEl.GetString();
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

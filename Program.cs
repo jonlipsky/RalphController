@@ -4,6 +4,38 @@ using RalphController.Models;
 using Spectre.Console;
 
 // Check for test modes
+if (args.Contains("--test-streaming"))
+{
+    // Test real-time streaming using AIProcess with timestamps
+    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Starting streaming test with AIProcess...\n");
+
+    var testConfig = new RalphConfig
+    {
+        TargetDirectory = Directory.GetCurrentDirectory(),
+        Provider = AIProvider.Claude,
+        ProviderConfig = AIProviderConfig.ForClaude()
+    };
+
+    using var aiProcess = new AIProcess(testConfig);
+
+    aiProcess.OnOutput += text =>
+    {
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] TEXT: {text}");
+    };
+    aiProcess.OnError += err =>
+    {
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] ERR: {err}");
+    };
+
+    Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Sending prompt...\n");
+
+    var result = await aiProcess.RunAsync("Count from 1 to 10, one number per line");
+
+    Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss.fff}] Complete. Exit code: {result.ExitCode}");
+    Console.WriteLine($"Full output: {result.Output}");
+    return 0;
+}
+
 if (args.Contains("--single-run"))
 {
     // Run one iteration without TUI to test the full loop

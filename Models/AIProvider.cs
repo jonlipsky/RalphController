@@ -30,13 +30,17 @@ public record AIProviderConfig
     /// <summary>Whether to write prompt to a temp file and reference it</summary>
     public bool UsesTempFile { get; init; } = false;
 
+    /// <summary>Whether output is in stream-json format that needs parsing</summary>
+    public bool UsesStreamJson { get; init; } = false;
+
     public static AIProviderConfig ForClaude(string? executablePath = null) => new()
     {
         Provider = AIProvider.Claude,
-        // Use stdbuf to force line-buffered output for real-time streaming
-        ExecutablePath = "stdbuf",
-        Arguments = $"-oL {executablePath ?? "claude"} -p --dangerously-skip-permissions",
-        UsesStdin = true
+        ExecutablePath = executablePath ?? "claude",
+        // Use stream-json with partial messages for real-time streaming
+        Arguments = "-p --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages",
+        UsesStdin = true,
+        UsesStreamJson = true
     };
 
     public static AIProviderConfig ForCodex(string? executablePath = null) => new()
