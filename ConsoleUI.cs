@@ -31,9 +31,9 @@ public class ConsoleUI : IDisposable
         _fileWatcher = fileWatcher;
         _config = config;
 
-        // Subscribe to controller events (escape AI output to prevent markup parsing)
-        _controller.OnOutput += line => AddOutputLine(Markup.Escape(line));
-        _controller.OnError += line => AddOutputLine($"[red]{Markup.Escape(line)}[/]");
+        // Subscribe to controller events - ANSI codes will be converted to Spectre markup
+        _controller.OnOutput += line => AddOutputLine(line, isRawOutput: true);
+        _controller.OnError += line => AddOutputLine(line, isRawOutput: true, isError: true);
         _controller.OnIterationStart += iter => AddOutputLine($"[blue]>>> Starting iteration {iter}[/]");
         _controller.OnIterationComplete += (iter, result) =>
         {
@@ -160,25 +160,36 @@ public class ConsoleUI : IDisposable
     private Panel BuildOutputPanel()
     {
         var lines = _outputLines.ToArray();
-        var content = lines.Length > 0
-            ? string.Join("\n", lines)
-            : "[dim]Waiting for output...[/]";
+        if (lines.Length == 0)
+        {
+            return new Panel(new Markup("[dim]Waiting for output...[/]"))
+                .Header("[bold]Output[/]")
+                .Border(BoxBorder.Rounded)
+                .Expand();
+        }
 
-        try
+        // Validate each line individually - escape lines that fail markup parsing
+        var validatedLines = new List<string>();
+        foreach (var line in lines)
         {
-            return new Panel(new Markup(content))
-                .Header("[bold]Output[/]")
-                .Border(BoxBorder.Rounded)
-                .Expand();
+            try
+            {
+                // Test if the line can be parsed as markup
+                _ = new Markup(line);
+                validatedLines.Add(line);
+            }
+            catch
+            {
+                // Line has invalid markup - escape it entirely
+                validatedLines.Add(Markup.Escape(line));
+            }
         }
-        catch
-        {
-            // If markup parsing fails, show as plain text
-            return new Panel(new Text(content))
-                .Header("[bold]Output[/]")
-                .Border(BoxBorder.Rounded)
-                .Expand();
-        }
+
+        var content = string.Join("\n", validatedLines);
+        return new Panel(new Markup(content))
+            .Header("[bold]Output[/]")
+            .Border(BoxBorder.Rounded)
+            .Expand();
     }
 
     private Panel BuildPlanPanel()
@@ -295,20 +306,35 @@ public class ConsoleUI : IDisposable
         }
     }
 
-    private void AddOutputLine(string line)
+    private void AddOutputLine(string line, bool isRawOutput = false, bool isError = false)
     {
         // Skip empty lines to save space
         if (string.IsNullOrWhiteSpace(line))
             return;
 
-        // Remove control characters that can mess up the layout
+        // Only process raw AI output - internal messages already have Spectre markup
+        if (isRawOutput)
+        {
+            // Convert ANSI escape codes to Spectre markup, escape all other brackets
+            line = ConvertAnsiToMarkup(line);
+
+            // If it's an error and doesn't have any color markup, wrap in red
+            if (isError && !line.Contains("[red]") && !line.Contains("[yellow]"))
+            {
+                line = $"[red]{line}[/]";
+            }
+        }
+
+        // Remove control characters that can mess up the layout (but preserve markup brackets)
         line = new string(line.Where(c => !char.IsControl(c) || c == ' ').ToArray());
 
         // Truncate long lines to prevent layout issues
         var maxLineLength = Math.Max(40, Console.WindowWidth - 15);
         if (line.Length > maxLineLength)
         {
-            line = line[..maxLineLength] + "...";
+            // Find a safe truncation point (not inside markup)
+            var truncated = TruncatePreservingMarkup(line, maxLineLength);
+            line = truncated + "...";
         }
 
         _outputLines.Enqueue(line);
@@ -318,6 +344,113 @@ public class ConsoleUI : IDisposable
         {
             _outputLines.TryDequeue(out _);
         }
+    }
+
+    private static string ConvertAnsiToMarkup(string input)
+    {
+        // Only convert ANSI escape codes to Spectre markup
+        // Leave everything else unchanged - BuildOutputPanel validates per-line
+        var result = new System.Text.StringBuilder();
+        var i = 0;
+
+        while (i < input.Length)
+        {
+            // Check for ANSI escape sequence (ESC[...m)
+            if (i < input.Length - 1 && input[i] == '\x1B' && input[i + 1] == '[')
+            {
+                var start = i + 2;
+                var end = start;
+                while (end < input.Length && !char.IsLetter(input[end]))
+                    end++;
+
+                if (end < input.Length && input[end] == 'm')
+                {
+                    var code = input[start..end];
+                    var markup = AnsiCodeToSpectreMarkup(code);
+                    if (markup != null)
+                        result.Append(markup);
+                    i = end + 1;
+                    continue;
+                }
+            }
+
+            result.Append(input[i]);
+            i++;
+        }
+
+        return result.ToString();
+    }
+
+    private static string? AnsiCodeToSpectreMarkup(string code)
+    {
+        // Handle multiple codes separated by semicolon
+        var codes = code.Split(';');
+        var result = new System.Text.StringBuilder();
+
+        foreach (var c in codes)
+        {
+            if (!int.TryParse(c, out var num))
+                continue;
+
+            var markup = num switch
+            {
+                0 => "[/]", // Reset
+                1 => "[bold]",
+                2 => "[dim]",
+                3 => "[italic]",
+                4 => "[underline]",
+                30 => "[black]",
+                31 => "[red]",
+                32 => "[green]",
+                33 => "[yellow]",
+                34 => "[blue]",
+                35 => "[magenta]",
+                36 => "[cyan]",
+                37 => "[white]",
+                39 => "[/]", // Default foreground
+                90 => "[grey]",
+                91 => "[red]",
+                92 => "[green]",
+                93 => "[yellow]",
+                94 => "[blue]",
+                95 => "[magenta]",
+                96 => "[cyan]",
+                97 => "[white]",
+                _ => null
+            };
+
+            if (markup != null)
+                result.Append(markup);
+        }
+
+        return result.Length > 0 ? result.ToString() : null;
+    }
+
+    private static string TruncatePreservingMarkup(string line, int maxLength)
+    {
+        // Simple truncation that tries to close any open markup tags
+        var visibleLength = 0;
+        var inMarkup = false;
+        var truncateAt = 0;
+
+        for (var i = 0; i < line.Length && visibleLength < maxLength; i++)
+        {
+            if (line[i] == '[' && i + 1 < line.Length && line[i + 1] != '[')
+            {
+                inMarkup = true;
+            }
+            else if (line[i] == ']' && inMarkup)
+            {
+                inMarkup = false;
+            }
+            else if (!inMarkup)
+            {
+                visibleLength++;
+                truncateAt = i + 1;
+            }
+        }
+
+        return line[..truncateAt];
     }
 
     public void Dispose()
