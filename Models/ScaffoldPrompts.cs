@@ -15,21 +15,113 @@ public static class ScaffoldPrompts
         PROJECT CONTEXT:
         {projectContext}
 
-        Create an agents.md file for this project.
+        Create an AGENTS.md file for this project. This is the operational guide for the AI agent - it defines
+        HOW the agent should operate, what subagents to spawn, rules for operation, and workflows.
 
-        This file is the agent's self-improvement notes. When the agent learns something new about:
-        - How to build/run/test the project
-        - Common errors and their solutions
-        - Project-specific commands or patterns
+        CRITICAL: This is NOT just a notes file. It's the agent's operating manual.
 
-        The agent should update this file to help future iterations.
+        ## Required Structure:
 
-        Requirements:
-        1. Start with a brief project description based on the context above
-        2. Include sections for: Build Commands, Test Commands, Common Issues, Learnings
-        3. Pre-fill any build/test commands you can infer from the project type
-        4. Keep it brief - this file is read every loop iteration
-        5. Use markdown format
+        ### 1. Core Principle Section
+        Start with a "Core Principle" section explaining the monolithic scheduler pattern:
+        - The primary context window operates as a SCHEDULER that spawns subagents
+        - Subagents handle specific tasks (exploration, implementation, testing)
+        - This extends effective context while maintaining a single source of truth
+
+        ### 2. Agent Architecture Diagram
+        Include an ASCII diagram showing:
+        ```
+        ┌─────────────────────────────────────────────────────────────┐
+        │                    Primary Agent (Scheduler)                 │
+        │  - Reads PROMPT.md each loop                                │
+        │  - Loads IMPLEMENTATION_PLAN.md                             │
+        │  - Selects ONE task per loop                                │
+        │  - Spawns subagents for work                                │
+        │  - Updates plan after completion                            │
+        └─────────────────────────────────────────────────────────────┘
+                   │                    │                    │
+                   ▼                    ▼                    ▼
+            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+            │  Explore    │     │  Implement  │     │  Build/Test │
+            │  Subagent   │     │  Subagent   │     │  Subagent   │
+            │  (parallel) │     │  (parallel) │     │  (serial)   │
+            └─────────────┘     └─────────────┘     └─────────────┘
+        ```
+
+        ### 3. Subagent Types Section
+        Define 4-6 subagent types relevant to this specific project. For each:
+        - **Purpose**: What this subagent does
+        - **Subagent type**: Which Task tool subagent_type to use (e.g., "Explore", "csharp-pro", "python-pro", etc.)
+        - **When to use**: Specific scenarios
+        - **Parallelism**: How many can run concurrently
+        - **Key files**: Files this subagent typically works with
+        - **Example tasks**: 3-5 example task descriptions
+
+        Common subagent types to consider:
+        - Explore Agent (always include - for searching/understanding codebase)
+        - Code Implementation Agent (language-specific: csharp-pro, python-pro, typescript-pro, etc.)
+        - Build/Test Agent (debugger - always serial, only one at a time)
+        - Documentation Agent (if applicable)
+        - Domain-specific agents based on project type
+
+        ### 4. Agent Rules Section
+        Include these core rules (numbered):
+        1. **One Task Per Loop**: Pick ONE task from implementation_plan.md per iteration
+        2. **Search Before Implementing**: Always spawn Explore agent before coding
+        3. **Parallel Exploration, Serial Building**: Up to 5 parallel explore/implement, but only 1 build/test
+        4. **No Placeholders**: Every implementation must be complete and functional
+        5. **Tests as Backpressure**: Fix failures before proceeding
+        6. **Commit When Green**: Commit after tests pass
+        7. **Update the Plan**: Mark tasks complete and add new discoveries
+
+        Add project-specific rules if applicable (e.g., "Do not edit generated code" for code generators).
+
+        ### 5. Task Selection Algorithm
+        Include a numbered algorithm:
+        ```
+        1. Read IMPLEMENTATION_PLAN.md
+        2. Find first incomplete task (pending/in_progress, no blockers, highest priority)
+        3. If blocked, complete blocking task first
+        4. Execute selected task
+        5. Update plan
+        6. Loop
+        ```
+
+        ### 6. Subagent Communication Section
+        Show how to spawn subagents using Task tool:
+        ```
+        Use Task tool with appropriate subagent_type:
+        - subagent_type: "Explore" - For searching/understanding
+        - subagent_type: "[language]-pro" - For implementation
+        - subagent_type: "debugger" - For build/test issues
+        ```
+
+        Include a prompt template example.
+
+        ### 7. Error Handling Section
+        Describe how to handle:
+        - Build errors
+        - Test failures
+        - Stuck agent (no progress after 3 attempts)
+
+        ### 8. Context Management Section
+        Describe what the primary agent and subagents should load.
+
+        ### 9. Build Commands Section
+        Include actual build/test commands for this project type.
+
+        ### 10. Example Workflow
+        Show a complete example loop iteration.
+
+        ### 11. See Also Section
+        Link to related files (PROMPT.md, IMPLEMENTATION_PLAN.md, etc.)
+
+        ## Important Guidelines:
+        - Be SPECIFIC to this project type (detect language/framework from context)
+        - Use the correct subagent_type values that exist in Claude Code's Task tool
+        - Make the ASCII diagram fit the project's specific workflow
+        - Include real commands for this project type (not placeholders)
+        - Keep practical and actionable
 
         Write the file to agents.md
         """;

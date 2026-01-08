@@ -181,32 +181,106 @@ public class ProjectScaffolder
     }
 
     private static string GetDefaultAgentsMd() => """
-        # Agent Notes
+        # Agent Configuration
 
-        This file contains learnings and notes for the AI agent. Update this file when you discover:
-        - How to build/test the project
-        - Common errors and solutions
-        - Project-specific patterns
+        ## Core Principle: Monolithic Scheduler with Subagents
+
+        This project uses a single autonomous agent running in a bash loop. The primary context window operates as a **scheduler** that spawns subagents for specific tasks. This extends effective context while maintaining a single source of truth.
+
+        ## Agent Architecture
+
+        ```
+        ┌─────────────────────────────────────────────────────────────┐
+        │                    Primary Agent (Scheduler)                 │
+        │                                                              │
+        │  - Reads PROMPT.md each loop                                │
+        │  - Loads IMPLEMENTATION_PLAN.md                             │
+        │  - Selects ONE task per loop                                │
+        │  - Spawns subagents for work                                │
+        │  - Updates plan after completion                            │
+        │  - Commits when tests pass                                  │
+        └─────────────────────────────────────────────────────────────┘
+                   │                    │                    │
+                   ▼                    ▼                    ▼
+            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+            │  Explore    │     │  Implement  │     │  Build/Test │
+            │  Subagent   │     │  Subagent   │     │  Subagent   │
+            │  (parallel) │     │  (parallel) │     │  (serial)   │
+            └─────────────┘     └─────────────┘     └─────────────┘
+        ```
+
+        ## Subagent Types
+
+        ### 1. Explore Agent
+        **Purpose**: Search and understand the codebase before making changes.
+        **Subagent type**: `Explore`
+        **Parallelism**: Up to 5 concurrent
+
+        **When to use**:
+        - Before implementing ANY feature
+        - When unsure if something exists
+        - To find related code patterns
+
+        ### 2. Implementation Agent
+        **Purpose**: Write and modify code.
+        **Subagent type**: Use language-specific (e.g., `csharp-pro`, `python-pro`, `typescript-pro`)
+        **Parallelism**: Up to 3 concurrent
+
+        ### 3. Build/Test Agent
+        **Purpose**: Run builds and tests to verify changes.
+        **Subagent type**: `debugger`
+        **CRITICAL**: Only ONE at a time.
+
+        ## Agent Rules
+
+        1. **One Task Per Loop**: Pick ONE task from implementation_plan.md per iteration
+        2. **Search Before Implementing**: Always spawn Explore agent before coding
+        3. **Parallel Exploration, Serial Building**: Multiple explores OK, but only 1 build/test
+        4. **No Placeholders**: Every implementation must be complete
+        5. **Tests as Backpressure**: Fix failures before proceeding
+        6. **Commit When Green**: Commit after tests pass
+        7. **Update the Plan**: Mark tasks complete and add discoveries
+
+        ## Task Selection Algorithm
+
+        1. Read IMPLEMENTATION_PLAN.md
+        2. Find first incomplete task (pending/in_progress, no blockers, highest priority)
+        3. If blocked, complete blocking task first
+        4. Execute selected task
+        5. Update plan
+        6. Loop
 
         ## Build Commands
 
         ```bash
-        # Add build commands here
+        # Add build commands for this project
         ```
 
         ## Test Commands
 
         ```bash
-        # Add test commands here
+        # Add test commands for this project
         ```
 
-        ## Common Issues
+        ## Error Handling
 
-        - None documented yet
+        ### Build Errors
+        1. Spawn debugger agent to analyze
+        2. Spawn explore agent to find similar working code
+        3. Implement fix
+        4. Re-run build
 
-        ## Learnings
+        ### Stuck Agent
+        If no progress after 3 attempts:
+        1. Document blocker in IMPLEMENTATION_PLAN.md
+        2. Move to next non-blocked task
+        3. Return later with fresh context
 
-        - None documented yet
+        ## See Also
+
+        - [prompt.md](./prompt.md) - Main loop prompt
+        - [implementation_plan.md](./implementation_plan.md) - Current task list
+        - [specs/](./specs/) - Specifications
         """;
 
     private static string GetDefaultSpecsReadme() => """
