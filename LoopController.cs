@@ -18,6 +18,8 @@ public class LoopController : IDisposable
     private string? _injectedPrompt;
     private readonly object _stateLock = new();
     private bool _disposed;
+    private DateTimeOffset? _providerRateLimitUntil;
+    private string? _providerRateLimitMessage;
 
     /// <summary>Current state of the loop</summary>
     public LoopState State { get; private set; } = LoopState.Idle;
@@ -194,6 +196,11 @@ public class LoopController : IDisposable
                 break;
             }
 
+            if (await WaitForProviderRateLimitAsync(cancellationToken))
+            {
+                continue;
+            }
+
             // Check for max iterations
             if (_config.MaxIterations.HasValue && _statistics.CurrentIteration >= _config.MaxIterations.Value)
             {
@@ -286,6 +293,25 @@ public class LoopController : IDisposable
                     Stop();
                 }
             }
+
+            var rateLimitInfo = ResponseAnalyzer.TryDetectRateLimit(result);
+            if (rateLimitInfo is not null)
+            {
+                var resetAt = rateLimitInfo.ResetAt ?? DateTimeOffset.UtcNow.AddMinutes(30);
+                _providerRateLimitUntil = resetAt;
+                _providerRateLimitMessage = rateLimitInfo.Message;
+
+                var localReset = resetAt.ToLocalTime();
+                var resetText = rateLimitInfo.ResetAt.HasValue
+                    ? $"{localReset:MMM d h:mm tt}"
+                    : $"{localReset:MMM d h:mm tt} (fallback)";
+
+                var message = string.IsNullOrWhiteSpace(_providerRateLimitMessage)
+                    ? "Provider rate limit detected"
+                    : $"Provider rate limit detected: {_providerRateLimitMessage}";
+
+                OnOutput?.Invoke($"{message}. Waiting until {resetText}.");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -347,6 +373,43 @@ public class LoopController : IDisposable
             State = newState;
             OnStateChanged?.Invoke(newState);
         }
+    }
+
+    private async Task<bool> WaitForProviderRateLimitAsync(CancellationToken cancellationToken)
+    {
+        if (!_providerRateLimitUntil.HasValue)
+            return false;
+
+        var until = _providerRateLimitUntil.Value;
+        var now = DateTimeOffset.UtcNow;
+        if (until <= now)
+        {
+            _providerRateLimitUntil = null;
+            _providerRateLimitMessage = null;
+            return false;
+        }
+
+        var remaining = until - now;
+        var localReset = until.ToLocalTime();
+        OnOutput?.Invoke($"Provider rate limit active. Waiting {remaining:hh\\:mm} (resets {localReset:MMM d h:mm tt}).");
+
+        while (DateTimeOffset.UtcNow < until && !cancellationToken.IsCancellationRequested)
+        {
+            var delay = until - DateTimeOffset.UtcNow;
+            if (delay > TimeSpan.FromMinutes(1))
+            {
+                delay = TimeSpan.FromMinutes(1);
+            }
+
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        _providerRateLimitUntil = null;
+        _providerRateLimitMessage = null;
+        return true;
     }
 
     public void Dispose()

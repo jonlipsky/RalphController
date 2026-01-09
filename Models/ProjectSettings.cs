@@ -17,6 +17,9 @@ public class ProjectSettings
     /// <summary>Model to use for Copilot (e.g., gpt-5, claude-sonnet-4)</summary>
     public string? CopilotModel { get; set; }
 
+    /// <summary>Model to use for OpenCode (e.g., anthropic/claude-3-5-sonnet)</summary>
+    public string? OpenCodeModel { get; set; }
+
     /// <summary>Custom executable path for the provider (optional)</summary>
     public string? ExecutablePath { get; set; }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace RalphController;
@@ -63,7 +64,7 @@ public class ResponseAnalyzer
     /// </summary>
     public AnalysisResult Analyze(AIResult result)
     {
-        var output = result.Output ?? "";
+        var output = CombineOutput(result);
         var analysis = new AnalysisResult
         {
             Timestamp = DateTime.UtcNow,
@@ -94,6 +95,14 @@ public class ResponseAnalyzer
         else
         {
             _testOnlyLoopCount = 0;
+        }
+
+        var rateLimitInfo = TryDetectRateLimit(output);
+        if (rateLimitInfo is not null)
+        {
+            analysis.IsRateLimited = true;
+            analysis.RateLimitResetAt = rateLimitInfo.ResetAt;
+            analysis.RateLimitMessage = rateLimitInfo.Message;
         }
 
         // Calculate confidence score
@@ -251,6 +260,120 @@ public class ResponseAnalyzer
 
         return status;
     }
+
+    private static string CombineOutput(AIResult result)
+    {
+        var output = result.Output ?? "";
+        var error = result.Error ?? "";
+        if (string.IsNullOrWhiteSpace(error))
+            return output;
+        return $"{output}\n{error}";
+    }
+
+    public static ProviderRateLimitInfo? TryDetectRateLimit(AIResult result)
+    {
+        return TryDetectRateLimit(CombineOutput(result));
+    }
+
+    private static ProviderRateLimitInfo? TryDetectRateLimit(string output)
+    {
+        if (!RateLimitRegex.IsMatch(output))
+            return null;
+
+        var resetAt = TryParseResetAt(output);
+        var message = ExtractRateLimitLine(output);
+        return new ProviderRateLimitInfo(resetAt, message);
+    }
+
+    private static readonly Regex RateLimitRegex = new(
+        @"\b(hit|reached)\s+(your\s+)?limit\b|\brate\s+limit\b|\bquota\s+exceeded\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ResetAtRegex = new(
+        @"resets\s+(?<time>\d{1,2}(?::\d{2})?\s*(am|pm)|\d{1,2}:\d{2})\s*(\((?<tz>[^)]+)\))?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ResetInRegex = new(
+        @"resets\s+in\s+(?<value>\d+)\s*(?<unit>hours?|hrs?|hr|h|minutes?|mins?|min|m)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static DateTimeOffset? TryParseResetAt(string output)
+    {
+        var inMatch = ResetInRegex.Match(output);
+        if (inMatch.Success)
+        {
+            if (int.TryParse(inMatch.Groups["value"].Value, out var value))
+            {
+                var unit = inMatch.Groups["unit"].Value.ToLowerInvariant();
+                var delta = unit.StartsWith("h")
+                    ? TimeSpan.FromHours(value)
+                    : TimeSpan.FromMinutes(value);
+                return DateTimeOffset.UtcNow.Add(delta);
+            }
+        }
+
+        var match = ResetAtRegex.Match(output);
+        if (!match.Success)
+            return null;
+
+        var timeText = match.Groups["time"].Value.Trim();
+        if (!TryParseTimeOfDay(timeText, out var timeOfDay))
+            return null;
+
+        var tzId = match.Groups["tz"].Success
+            ? match.Groups["tz"].Value.Trim()
+            : TimeZoneInfo.Local.Id;
+
+        TimeZoneInfo tz;
+        try
+        {
+            tz = TimeZoneInfo.FindSystemTimeZoneById(tzId);
+        }
+        catch
+        {
+            tz = TimeZoneInfo.Local;
+        }
+
+        var nowInTz = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+        var localDateTime = nowInTz.Date + timeOfDay;
+        var offset = tz.GetUtcOffset(localDateTime);
+        var candidate = new DateTimeOffset(localDateTime, offset);
+
+        if (candidate <= nowInTz)
+            candidate = candidate.AddDays(1);
+
+        return candidate;
+    }
+
+    private static bool TryParseTimeOfDay(string input, out TimeSpan timeOfDay)
+    {
+        var formats = new[]
+        {
+            "h tt", "htt", "h:mm tt", "hh:mm tt",
+            "H:mm", "HH:mm"
+        };
+
+        if (DateTime.TryParseExact(input, formats, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var dt))
+        {
+            timeOfDay = dt.TimeOfDay;
+            return true;
+        }
+
+        timeOfDay = default;
+        return false;
+    }
+
+    private static string? ExtractRateLimitLine(string output)
+    {
+        foreach (var line in output.Split('\n'))
+        {
+            if (RateLimitRegex.IsMatch(line))
+                return line.Trim();
+        }
+
+        return null;
+    }
 }
 
 /// <summary>
@@ -267,7 +390,12 @@ public class AnalysisResult
     public bool ShouldExit { get; set; }
     public string? ExitReason { get; set; }
     public RalphStatus? RalphStatus { get; set; }
+    public bool IsRateLimited { get; set; }
+    public DateTimeOffset? RateLimitResetAt { get; set; }
+    public string? RateLimitMessage { get; set; }
 }
+
+public record ProviderRateLimitInfo(DateTimeOffset? ResetAt, string? Message);
 
 /// <summary>
 /// Parsed RALPH_STATUS block from AI output

@@ -12,7 +12,10 @@ public enum AIProvider
     Codex,
 
     /// <summary>GitHub Copilot CLI</summary>
-    Copilot
+    Copilot,
+
+    /// <summary>OpenCode CLI</summary>
+    OpenCode
 }
 
 /// <summary>
@@ -69,5 +72,14 @@ public record AIProviderConfig
         Arguments = $"--allow-all-tools --model {model ?? "gpt-5"} -p",
         UsesStdin = false,
         UsesPromptArgument = true  // Prompt is passed as quoted argument after -p
+    };
+
+    public static AIProviderConfig ForOpenCode(string? executablePath = null, string? model = null) => new()
+    {
+        Provider = AIProvider.OpenCode,
+        ExecutablePath = executablePath ?? "opencode",
+        Arguments = string.IsNullOrWhiteSpace(model) ? "run" : $"run --model {model}",
+        UsesStdin = false,
+        UsesPromptArgument = true
     };
 }

@@ -233,6 +233,7 @@ for (int i = 0; i < args.Length; i++)
             "codex" => AIProvider.Codex,
             "claude" => AIProvider.Claude,
             "copilot" => AIProvider.Copilot,
+            "opencode" => AIProvider.OpenCode,
             _ => null
         };
     }
@@ -252,6 +253,10 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--claude")
     {
         providerFromArgs = AIProvider.Claude;
+    }
+    else if (args[i] == "--opencode")
+    {
+        providerFromArgs = AIProvider.OpenCode;
     }
     else if (args[i] == "--init" || args[i] == "--spec")
     {
@@ -343,7 +348,7 @@ else
     provider = AnsiConsole.Prompt(
         new SelectionPrompt<AIProvider>()
             .Title("[yellow]Select AI provider:[/]")
-            .AddChoices(AIProvider.Claude, AIProvider.Codex, AIProvider.Copilot));
+            .AddChoices(AIProvider.Claude, AIProvider.Codex, AIProvider.Copilot, AIProvider.OpenCode));
     providerWasSelected = true;
 }
 
@@ -388,6 +393,40 @@ if (provider == AIProvider.Copilot)
     AnsiConsole.MarkupLine($"[green]Model:[/] {copilotModel}");
 }
 
+// For OpenCode, handle model selection
+string? openCodeModel = null;
+if (provider == AIProvider.OpenCode)
+{
+    if (!string.IsNullOrEmpty(modelFromArgs))
+    {
+        // Use command line argument
+        openCodeModel = modelFromArgs;
+        projectSettings.OpenCodeModel = openCodeModel;
+    }
+    else if (!string.IsNullOrEmpty(projectSettings.OpenCodeModel))
+    {
+        // Use saved model
+        openCodeModel = projectSettings.OpenCodeModel;
+        AnsiConsole.MarkupLine($"[dim]Using saved model: {openCodeModel}[/]");
+    }
+    else
+    {
+        // Prompt for model (provider/model), allow default
+        var modelInput = AnsiConsole.Prompt(
+            new TextPrompt<string>("[yellow]Enter OpenCode model (provider/model) or leave blank for default:[/]")
+                .AllowEmpty());
+
+        openCodeModel = string.IsNullOrWhiteSpace(modelInput) ? null : modelInput;
+        if (!string.IsNullOrEmpty(openCodeModel))
+        {
+            projectSettings.OpenCodeModel = openCodeModel;
+        }
+    }
+
+    var modelLabel = string.IsNullOrEmpty(openCodeModel) ? "(default)" : openCodeModel;
+    AnsiConsole.MarkupLine($"[green]Model:[/] {modelLabel}");
+}
+
 // Save provider to project settings if it changed or was newly selected
 if (providerWasSelected || (providerFromArgs.HasValue && providerFromArgs != savedProvider))
 {
@@ -400,6 +439,7 @@ var providerConfig = provider switch
 {
     AIProvider.Codex => AIProviderConfig.ForCodex(),
     AIProvider.Copilot => AIProviderConfig.ForCopilot(model: copilotModel),
+    AIProvider.OpenCode => AIProviderConfig.ForOpenCode(model: openCodeModel),
     _ => AIProviderConfig.ForClaude()
 };
 

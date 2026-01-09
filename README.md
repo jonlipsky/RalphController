@@ -20,7 +20,7 @@ RalphController automates the Ralph Wiggum technique:
 - **Live Streaming**: See AI output as it's generated, not just after completion
 - **Project Scaffolding**: Generate all project files from a description or spec file
 - **Re-initialization**: Use `--init` to regenerate project files with new requirements
-- **Multi-Provider**: Supports Claude, Codex, and GitHub Copilot CLI
+- **Multi-Provider**: Supports Claude, Codex, GitHub Copilot, and OpenCode
 - **Provider Persistence**: Remembers your provider choice per project in `.ralph.json`
 - **Global Tool**: Install as `ralph` command, run from any directory
 - **Pause/Resume/Stop**: Full control over the loop execution
@@ -110,6 +110,7 @@ dotnet run -- /path/to/your/project
   - Claude CLI (`claude`) - [Anthropic](https://docs.anthropic.com/claude/docs/claude-cli)
   - Codex CLI (`codex`) - [OpenAI](https://github.com/openai/codex-cli)
   - Copilot CLI (`copilot`) - [GitHub](https://github.com/github/copilot-cli)
+  - OpenCode CLI (`opencode`) - [OpenCode](https://opencode.ai/docs/cli/)
 - Terminal with ANSI color support
 
 ## Usage
@@ -127,9 +128,18 @@ ralph /path/to/project
 ralph --claude              # Anthropic Claude
 ralph --codex               # OpenAI Codex
 ralph --copilot             # GitHub Copilot
+ralph --opencode            # OpenCode
 
 # Or use --provider flag
 ralph --provider copilot
+ralph --provider opencode
+
+# Specify a model (Copilot or OpenCode)
+ralph --copilot --model gpt-5.1
+
+# Specify a model for OpenCode (provider/model)
+ralph --opencode --model anthropic/claude-3-5-sonnet
+
 ```
 
 ### Provider Persistence
