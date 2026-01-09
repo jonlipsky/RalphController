@@ -99,14 +99,18 @@ public class OllamaClient : IDisposable
                 _conversationHistory.Add(assistantMessage);
 
                 // Check if there are tool calls to execute (native or parsed from text)
+                var isTextParsedToolCall = false;
                 if (toolCalls.Count == 0 && !string.IsNullOrEmpty(textContent))
                 {
                     // Try to parse tool calls from text (for models that don't use native tool calling)
                     toolCalls = ParseToolCallsFromText(textContent);
+                    isTextParsedToolCall = toolCalls.Count > 0;
                 }
 
                 if (toolCalls.Count > 0)
                 {
+                    var allResults = new StringBuilder();
+
                     foreach (var toolCall in toolCalls)
                     {
                         var toolName = toolCall.Function?.Name ?? "unknown";
@@ -125,12 +129,32 @@ public class OllamaClient : IDisposable
                         OnToolResult?.Invoke(toolName, displayResult);
                         OnOutput?.Invoke($"[Result: {displayResult}]\n\n");
 
-                        // Add tool result to conversation
+                        if (isTextParsedToolCall)
+                        {
+                            // For text-parsed tool calls, collect results to send as user message
+                            allResults.AppendLine($"Tool '{toolName}' result:");
+                            allResults.AppendLine(toolResult);
+                            allResults.AppendLine();
+                        }
+                        else
+                        {
+                            // For native tool calls, add as tool role message
+                            _conversationHistory.Add(new ChatMessage
+                            {
+                                Role = "tool",
+                                Content = toolResult,
+                                ToolCallId = toolCall.Id
+                            });
+                        }
+                    }
+
+                    // For text-parsed tool calls, send results as a user message
+                    if (isTextParsedToolCall && allResults.Length > 0)
+                    {
                         _conversationHistory.Add(new ChatMessage
                         {
-                            Role = "tool",
-                            Content = toolResult,
-                            ToolCallId = toolCall.Id
+                            Role = "user",
+                            Content = $"Here are the tool results:\n\n{allResults}\n\nPlease continue based on these results."
                         });
                     }
 

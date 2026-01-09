@@ -55,14 +55,15 @@ static async Task<List<string>> GetOpenCodeModels()
 
 static async Task<List<string>> GetOllamaModels(string baseUrl)
 {
+    var models = new List<string>();
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    var trimmedUrl = baseUrl.TrimEnd('/');
+
+    // Try Ollama endpoint first: /api/tags
     try
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        var response = await client.GetStringAsync($"{baseUrl.TrimEnd('/')}/api/tags");
-
-        // Parse JSON response: {"models":[{"name":"llama3.1:8b",...},...]
+        var response = await client.GetStringAsync($"{trimmedUrl}/api/tags");
         using var doc = System.Text.Json.JsonDocument.Parse(response);
-        var models = new List<string>();
 
         if (doc.RootElement.TryGetProperty("models", out var modelsArray))
         {
@@ -70,12 +71,40 @@ static async Task<List<string>> GetOllamaModels(string baseUrl)
             {
                 if (model.TryGetProperty("name", out var nameElement))
                 {
-                    models.Add(nameElement.GetString() ?? "");
+                    var name = nameElement.GetString();
+                    if (!string.IsNullOrEmpty(name))
+                        models.Add(name);
                 }
             }
         }
 
-        // Sort by name
+        if (models.Count > 0)
+        {
+            models.Sort();
+            return models;
+        }
+    }
+    catch { /* Try OpenAI endpoint */ }
+
+    // Try OpenAI-compatible endpoint (LM Studio): /v1/models
+    try
+    {
+        var response = await client.GetStringAsync($"{trimmedUrl}/v1/models");
+        using var doc = System.Text.Json.JsonDocument.Parse(response);
+
+        if (doc.RootElement.TryGetProperty("data", out var dataArray))
+        {
+            foreach (var model in dataArray.EnumerateArray())
+            {
+                if (model.TryGetProperty("id", out var idElement))
+                {
+                    var id = idElement.GetString();
+                    if (!string.IsNullOrEmpty(id))
+                        models.Add(id);
+                }
+            }
+        }
+
         models.Sort();
         return models;
     }
