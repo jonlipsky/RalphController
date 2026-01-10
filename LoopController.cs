@@ -183,8 +183,15 @@ public class LoopController : IDisposable
         {
             if (State == LoopState.Idle || State == LoopState.Stopping)
             {
+                OnOutput?.Invoke($"[Stop] Called but already {State}, ignoring");
                 return;
             }
+
+            OnOutput?.Invoke($"[Stop] Stopping loop from state {State}");
+            // Log stack trace to see who called Stop
+            var stackTrace = Environment.StackTrace;
+            var callerInfo = stackTrace.Split('\n').Skip(1).Take(3);
+            OnOutput?.Invoke($"[Stop] Called from: {string.Join(" <- ", callerInfo.Select(s => s.Trim()))}");
 
             SetState(LoopState.Stopping);
 
@@ -219,11 +226,14 @@ public class LoopController : IDisposable
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
+        OnOutput?.Invoke("[Loop] Starting main loop...");
+
         while (!cancellationToken.IsCancellationRequested)
         {
             // Check if we should stop
             if (State == LoopState.Stopping)
             {
+                OnOutput?.Invoke("[Loop] Exiting: State is Stopping");
                 break;
             }
 
@@ -235,7 +245,8 @@ public class LoopController : IDisposable
             // Check for max iterations
             if (_config.MaxIterations.HasValue && _statistics.CurrentIteration >= _config.MaxIterations.Value)
             {
-                OnOutput?.Invoke($"Max iterations ({_config.MaxIterations}) reached");
+                OnOutput?.Invoke("");
+                OnOutput?.Invoke($"[Loop] Exiting: Max iterations ({_config.MaxIterations}) reached");
                 break;
             }
 
@@ -271,7 +282,9 @@ public class LoopController : IDisposable
             }
 
             // Run an iteration
+            OnOutput?.Invoke($"[Loop] Running iteration {_statistics.CurrentIteration + 1}...");
             await RunIterationAsync(cancellationToken);
+            OnOutput?.Invoke($"[Loop] Iteration {_statistics.CurrentIteration} completed, State={State}");
 
             // Delay between iterations
             if (_config.IterationDelayMs > 0 && State == LoopState.Running)
@@ -279,6 +292,8 @@ public class LoopController : IDisposable
                 await Task.Delay(_config.IterationDelayMs, cancellationToken);
             }
         }
+
+        OnOutput?.Invoke($"[Loop] Main loop exited. Final state: {State}, Iterations: {_statistics.CurrentIteration}");
     }
 
     private async Task RunIterationAsync(CancellationToken cancellationToken)
@@ -330,57 +345,104 @@ public class LoopController : IDisposable
         // Note: Model name is now shown in the iteration header, so no need to output here
 
         // Create and run process - use OllamaClient for Ollama provider
+        // Wrap in try-catch to handle agent failures gracefully
         AIResult result;
-        if (currentProvider == AIProvider.Ollama)
+        try
         {
-            // For Ollama, use OllamaClient with streaming support
-            var baseUrl = currentProviderConfig.ExecutablePath ?? "http://localhost:11434";
-            var model = currentProviderConfig.Arguments ?? "llama3.1:8b";
-
-            _ollamaClient = new OllamaClient(baseUrl, model, _config.TargetDirectory);
-            _ollamaClient.OnOutput += text => OnOutput?.Invoke(text);
-            _ollamaClient.OnToolCall += (name, args) => OnOutput?.Invoke($"[Tool: {name}]");
-            _ollamaClient.OnToolResult += (name, res) =>
+            if (currentProvider == AIProvider.Ollama)
             {
-                var preview = res.Length > 500 ? res.Substring(0, 500) + "..." : res;
-                OnOutput?.Invoke($"[Result: {preview}]");
-            };
-            _ollamaClient.OnError += err => OnError?.Invoke(err);
+                // For Ollama, use OllamaClient with streaming support
+                var baseUrl = currentProviderConfig.ExecutablePath ?? "http://localhost:11434";
+                var model = currentProviderConfig.Arguments ?? "llama3.1:8b";
 
-            try
-            {
-                var ollamaResult = await _ollamaClient.RunAsync(prompt, cancellationToken);
-                result = new AIResult
+                _ollamaClient = new OllamaClient(baseUrl, model, _config.TargetDirectory);
+                _ollamaClient.OnOutput += text => OnOutput?.Invoke(text);
+                _ollamaClient.OnToolCall += (name, args) => OnOutput?.Invoke($"[Tool: {name}]");
+                _ollamaClient.OnToolResult += (name, res) =>
                 {
-                    Success = ollamaResult.Success,
-                    ExitCode = ollamaResult.Success ? 0 : 1,
-                    Output = ollamaResult.Output,
-                    Error = ollamaResult.Error
+                    var preview = res.Length > 500 ? res.Substring(0, 500) + "..." : res;
+                    OnOutput?.Invoke($"[Result: {preview}]");
                 };
+                _ollamaClient.OnError += err => OnError?.Invoke(err);
+
+                try
+                {
+                    var ollamaResult = await _ollamaClient.RunAsync(prompt, cancellationToken);
+                    result = new AIResult
+                    {
+                        Success = ollamaResult.Success,
+                        ExitCode = ollamaResult.Success ? 0 : 1,
+                        Output = ollamaResult.Output,
+                        Error = ollamaResult.Error
+                    };
+                }
+                finally
+                {
+                    _ollamaClient.Dispose();
+                    _ollamaClient = null;
+                }
             }
-            finally
+            else
             {
-                _ollamaClient.Dispose();
-                _ollamaClient = null;
+                // For other providers, use AIProcess with dynamic config
+                var dynamicConfig = _config with { ProviderConfig = currentProviderConfig, Provider = currentProvider };
+                _currentProcess = new AIProcess(dynamicConfig);
+                _currentProcess.OnOutput += line => OnOutput?.Invoke(line);
+                _currentProcess.OnError += line => OnError?.Invoke(line);
+
+                try
+                {
+                    result = await _currentProcess.RunAsync(prompt, cancellationToken);
+                }
+                finally
+                {
+                    _currentProcess.Dispose();
+                    _currentProcess = null;
+                }
             }
         }
-        else
+        catch (OperationCanceledException)
         {
-            // For other providers, use AIProcess with dynamic config
-            var dynamicConfig = _config with { ProviderConfig = currentProviderConfig, Provider = currentProvider };
-            _currentProcess = new AIProcess(dynamicConfig);
-            _currentProcess.OnOutput += line => OnOutput?.Invoke(line);
-            _currentProcess.OnError += line => OnError?.Invoke(line);
+            // Re-throw cancellation - this is expected behavior
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Agent failed - log the error and continue to next iteration
+            var providerName = currentModel?.DisplayName ?? currentProvider.ToString();
+            OnError?.Invoke($"[Agent Error] {providerName} failed: {ex.Message}");
+            OnOutput?.Invoke("");
+            OnOutput?.Invoke($"╔══════════════════════════════════════════════════════════════╗");
+            OnOutput?.Invoke($"║  AGENT FAILED - Moving to next iteration                     ║");
+            OnOutput?.Invoke($"╚══════════════════════════════════════════════════════════════╝");
+            OnOutput?.Invoke($"Provider: {providerName}");
+            OnOutput?.Invoke($"Error: {ex.Message}");
+            OnOutput?.Invoke("");
 
-            try
+            // Create a failed result
+            result = new AIResult
             {
-                result = await _currentProcess.RunAsync(prompt, cancellationToken);
-            }
-            finally
+                Success = false,
+                ExitCode = -1,
+                Output = "",
+                Error = ex.Message
+            };
+
+            // Notify model selector of failure for fallback strategy
+            _modelSelector.OnIterationFailed(isRateLimit: false);
+
+            // Record iteration as failed but continue
+            _statistics.CompleteIteration(false);
+            OnIterationComplete?.Invoke(_statistics.CurrentIteration, result);
+
+            // Move to next model if in multi-model mode
+            if (_config.MultiModel?.IsEnabled == true)
             {
-                _currentProcess.Dispose();
-                _currentProcess = null;
+                _modelSelector.AfterIteration(0);
+                OnOutput?.Invoke("[Loop] Rotating to next model and continuing...");
             }
+
+            return; // Continue to next iteration
         }
 
         _statistics.CompleteIteration(result.Success);
@@ -462,9 +524,11 @@ public class LoopController : IDisposable
         if (_config.EnableResponseAnalyzer)
         {
             var analysis = _responseAnalyzer.Analyze(result);
+            OnOutput?.Invoke($"[Analysis] ShouldExit={analysis.ShouldExit}, Confidence={analysis.ConfidenceScore}, Signal={analysis.HasCompletionSignal}");
 
             if (analysis.ShouldExit && _config.AutoExitOnCompletion)
             {
+                OnOutput?.Invoke($"[Analysis] Exit triggered: {analysis.ExitReason}");
                 // Check if we need to run multi-model verification first
                 if (_config.MultiModel?.Strategy == ModelSwitchStrategy.Verification)
                 {
@@ -488,10 +552,15 @@ public class LoopController : IDisposable
                 }
                 else
                 {
+                    OnOutput?.Invoke($"[Analysis] No verification enabled, stopping directly");
                     OnOutput?.Invoke($"Completion detected: {analysis.ExitReason}");
                     Stop();
                 }
             }
+        }
+        else
+        {
+            OnOutput?.Invoke("[Analysis] Response analyzer disabled");
         }
 
         // Handle rate limits with fallback
@@ -518,6 +587,22 @@ public class LoopController : IDisposable
         }
         else if (!result.Success)
         {
+            // Agent returned non-zero exit code - log warning and continue
+            var providerName = currentModel?.DisplayName ?? currentProvider.ToString();
+            OnOutput?.Invoke("");
+            OnOutput?.Invoke($"[Warning] {providerName} exited with code {result.ExitCode}");
+            if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                // Show first line of error only to avoid spam
+                var firstErrorLine = result.Error.Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
+                if (firstErrorLine != null)
+                {
+                    OnOutput?.Invoke($"[Warning] {firstErrorLine}");
+                }
+            }
+            OnOutput?.Invoke("[Warning] Moving to next iteration...");
+            OnOutput?.Invoke("");
+
             // Notify model selector for fallback strategy on failures
             _modelSelector.OnIterationFailed(isRateLimit: false);
         }

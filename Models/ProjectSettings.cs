@@ -62,11 +62,39 @@ public class ProjectSettings
         try
         {
             var json = File.ReadAllText(settingsPath);
-            return JsonSerializer.Deserialize<ProjectSettings>(json, JsonOptions) ?? new ProjectSettings();
+            var settings = JsonSerializer.Deserialize<ProjectSettings>(json, JsonOptions) ?? new ProjectSettings();
+
+            // Fix generic labels like "Model 2", "Model 3" to use actual model names
+            settings.FixGenericLabels();
+
+            return settings;
         }
         catch
         {
             return new ProjectSettings();
+        }
+    }
+
+    /// <summary>
+    /// Fix generic labels in multi-model config to use actual model names
+    /// </summary>
+    private void FixGenericLabels()
+    {
+        if (MultiModel?.Models == null) return;
+
+        foreach (var model in MultiModel.Models)
+        {
+            // If label is generic like "Model 2", "Model 3", "Primary", "Verifier" etc., use the actual model name
+            if (string.IsNullOrEmpty(model.Label) ||
+                model.Label == "Primary" ||
+                model.Label == "Verifier" ||
+                System.Text.RegularExpressions.Regex.IsMatch(model.Label, @"^Model \d+$"))
+            {
+                // Use the actual model name, or provider name as fallback
+                model.Label = !string.IsNullOrEmpty(model.Model)
+                    ? model.Model
+                    : model.Provider.ToString();
+            }
         }
     }
 
