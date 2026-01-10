@@ -22,6 +22,8 @@ public class LoopController : IDisposable
     private bool _disposed;
     private DateTimeOffset? _providerRateLimitUntil;
     private string? _providerRateLimitMessage;
+    private bool _pendingFinalVerification;
+    private bool _inFinalVerification;
 
     /// <summary>Current state of the loop</summary>
     public LoopState State { get; private set; } = LoopState.Idle;
@@ -55,6 +57,12 @@ public class LoopController : IDisposable
 
     /// <summary>Fired when verification completes (passed, filesChanged)</summary>
     public event Action<bool, int>? OnVerificationComplete;
+
+    /// <summary>Fired when final verification starts</summary>
+    public event Action? OnFinalVerificationStart;
+
+    /// <summary>Fired when final verification completes (allComplete, incompleteTasks)</summary>
+    public event Action<bool, List<string>>? OnFinalVerificationComplete;
 
     /// <summary>Fired when an iteration completes</summary>
     public event Action<int, AIResult>? OnIterationComplete;
@@ -112,6 +120,8 @@ public class LoopController : IDisposable
         _loopCts = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation);
         _statistics.Reset();
         _modelSelector.Reset();
+        _pendingFinalVerification = false;
+        _inFinalVerification = false;
 
         try
         {
@@ -271,9 +281,18 @@ public class LoopController : IDisposable
         _statistics.StartIteration();
         OnIterationStart?.Invoke(_statistics.CurrentIteration);
 
-        // Get prompt (injected or from file)
+        // Get prompt (injected, final verification, or from file)
         string prompt;
-        if (_injectedPrompt is not null)
+        if (_pendingFinalVerification)
+        {
+            // Inject the final verification prompt
+            _pendingFinalVerification = false;
+            _inFinalVerification = true;
+            OnFinalVerificationStart?.Invoke();
+            OnOutput?.Invoke("[Final Verification] Verifying all tasks are complete...");
+            prompt = FinalVerification.GetVerificationPrompt(_config.PlanFilePath);
+        }
+        else if (_injectedPrompt is not null)
         {
             prompt = _injectedPrompt;
             _injectedPrompt = null;
@@ -386,6 +405,47 @@ public class LoopController : IDisposable
             }
         }
 
+        // Check if this was a final verification iteration
+        if (_inFinalVerification)
+        {
+            _inFinalVerification = false;
+            var verificationResult = FinalVerification.ParseVerificationResult(result.Output);
+
+            if (verificationResult != null)
+            {
+                OnFinalVerificationComplete?.Invoke(verificationResult.AllTasksComplete, verificationResult.IncompleteTasks);
+
+                if (verificationResult.AllTasksComplete)
+                {
+                    OnOutput?.Invoke($"[Final Verification PASSED] All {verificationResult.CompletedTasks.Count} tasks verified complete!");
+                    if (!string.IsNullOrEmpty(verificationResult.Summary))
+                    {
+                        OnOutput?.Invoke($"Summary: {verificationResult.Summary}");
+                    }
+                    Stop();
+                    return;
+                }
+                else
+                {
+                    OnOutput?.Invoke($"[Final Verification INCOMPLETE] Found {verificationResult.IncompleteTasks.Count} incomplete task(s):");
+                    foreach (var task in verificationResult.IncompleteTasks)
+                    {
+                        OnOutput?.Invoke($"  - {task}");
+                    }
+                    OnOutput?.Invoke("Continuing work on incomplete tasks...");
+                    // Don't stop - continue with standard prompt
+                    return;
+                }
+            }
+            else
+            {
+                // Couldn't parse verification result, check if output indicates more work
+                OnOutput?.Invoke("[Final Verification] Could not parse structured result, continuing...");
+                // Don't stop - let the AI continue working
+                return;
+            }
+        }
+
         // Analyze response for completion signals
         if (_config.EnableResponseAnalyzer)
         {
@@ -393,12 +453,19 @@ public class LoopController : IDisposable
 
             if (analysis.ShouldExit && _config.AutoExitOnCompletion)
             {
-                // Check if we need to run verification first
+                // Check if we need to run multi-model verification first
                 if (_config.MultiModel?.Strategy == ModelSwitchStrategy.Verification)
                 {
                     _modelSelector.OnCompletionDetected(filesModified);
-                    OnOutput?.Invoke($"Completion detected: {analysis.ExitReason} - running verification...");
+                    OnOutput?.Invoke($"Completion detected: {analysis.ExitReason} - running model verification...");
                     // Don't stop - let next iteration run with verifier
+                }
+                // Check if we need to run final task verification
+                else if (_config.EnableFinalVerification)
+                {
+                    _pendingFinalVerification = true;
+                    OnOutput?.Invoke($"Completion detected: {analysis.ExitReason} - running final verification...");
+                    // Don't stop - let next iteration run verification prompt
                 }
                 else
                 {

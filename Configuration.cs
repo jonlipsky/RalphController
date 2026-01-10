@@ -55,6 +55,9 @@ public record RalphConfig
     /// <summary>Auto-exit when completion signals detected</summary>
     public bool AutoExitOnCompletion { get; init; } = true;
 
+    /// <summary>Enable final verification step before completing</summary>
+    public bool EnableFinalVerification { get; init; } = true;
+
     /// <summary>Full path to prompt file</summary>
     public string PromptFilePath => Path.Combine(TargetDirectory, PromptFile);
 

@@ -409,3 +409,161 @@ public class RalphStatus
     public bool? TestsPassed { get; set; }
     public string? NextStep { get; set; }
 }
+
+/// <summary>
+/// Result of final verification analysis
+/// </summary>
+public class VerificationResult
+{
+    public bool AllTasksComplete { get; set; }
+    public List<string> CompletedTasks { get; set; } = new();
+    public List<string> IncompleteTasks { get; set; } = new();
+    public string? Summary { get; set; }
+}
+
+/// <summary>
+/// Provides verification prompts and parsing
+/// </summary>
+public static class FinalVerification
+{
+    /// <summary>
+    /// Get the verification prompt to inject after completion is detected
+    /// </summary>
+    public static string GetVerificationPrompt(string? implementationPlanPath = null)
+    {
+        var planSection = "";
+        if (!string.IsNullOrEmpty(implementationPlanPath) && File.Exists(implementationPlanPath))
+        {
+            try
+            {
+                var planContent = File.ReadAllText(implementationPlanPath);
+                planSection = $@"
+
+## Implementation Plan to Verify:
+{planContent}
+";
+            }
+            catch { /* Ignore if can't read */ }
+        }
+
+        return $@"
+---FINAL_VERIFICATION_REQUEST---
+
+You indicated that the task is complete. Before we finish, please perform a final verification:
+
+1. Review each item in the implementation plan or task list
+2. For EACH item, verify it has been fully implemented:
+   - Check that the code exists and is correct
+   - Verify tests pass (if applicable)
+   - Confirm the feature works as expected
+
+3. Report your findings in this EXACT format:
+
+---VERIFICATION_RESULT---
+OVERALL_STATUS: [COMPLETE or INCOMPLETE]
+
+COMPLETED_TASKS:
+- [Task 1 that is done]
+- [Task 2 that is done]
+
+INCOMPLETE_TASKS:
+- [Task that still needs work]: [What's missing]
+- [Another incomplete task]: [What's missing]
+
+SUMMARY: [Brief summary of verification findings]
+---END_VERIFICATION---
+
+If any tasks are INCOMPLETE, continue working on them. Only report COMPLETE if ALL tasks are truly finished.
+{planSection}
+";
+    }
+
+    /// <summary>
+    /// Parse the verification result from AI output
+    /// </summary>
+    public static VerificationResult? ParseVerificationResult(string output)
+    {
+        // Look for ---VERIFICATION_RESULT--- block
+        var match = Regex.Match(output,
+            @"---VERIFICATION_RESULT---\s*(.*?)\s*---END_VERIFICATION---",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+        if (!match.Success)
+        {
+            // Try alternative patterns
+            match = Regex.Match(output,
+                @"OVERALL_STATUS:\s*(COMPLETE|INCOMPLETE)",
+                RegexOptions.IgnoreCase);
+
+            if (!match.Success)
+                return null;
+        }
+
+        var content = match.Groups[1].Value;
+        var result = new VerificationResult();
+
+        // Parse overall status
+        var statusMatch = Regex.Match(content, @"OVERALL_STATUS:\s*(COMPLETE|INCOMPLETE)", RegexOptions.IgnoreCase);
+        if (statusMatch.Success)
+        {
+            result.AllTasksComplete = statusMatch.Groups[1].Value.Equals("COMPLETE", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Parse completed tasks
+        var completedMatch = Regex.Match(content, @"COMPLETED_TASKS:\s*((?:- .+\n?)+)", RegexOptions.IgnoreCase);
+        if (completedMatch.Success)
+        {
+            var tasks = completedMatch.Groups[1].Value;
+            foreach (Match taskMatch in Regex.Matches(tasks, @"- (.+?)(?:\n|$)"))
+            {
+                var task = taskMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrEmpty(task))
+                    result.CompletedTasks.Add(task);
+            }
+        }
+
+        // Parse incomplete tasks
+        var incompleteMatch = Regex.Match(content, @"INCOMPLETE_TASKS:\s*((?:- .+\n?)+)", RegexOptions.IgnoreCase);
+        if (incompleteMatch.Success)
+        {
+            var tasks = incompleteMatch.Groups[1].Value;
+            foreach (Match taskMatch in Regex.Matches(tasks, @"- (.+?)(?:\n|$)"))
+            {
+                var task = taskMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrEmpty(task) && !task.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    result.IncompleteTasks.Add(task);
+            }
+        }
+
+        // Parse summary
+        var summaryMatch = Regex.Match(content, @"SUMMARY:\s*(.+?)(?:\n|$)", RegexOptions.IgnoreCase);
+        if (summaryMatch.Success)
+        {
+            result.Summary = summaryMatch.Groups[1].Value.Trim();
+        }
+
+        // If no explicit incomplete tasks but status is incomplete, mark as incomplete
+        if (!result.AllTasksComplete && result.IncompleteTasks.Count == 0)
+        {
+            result.IncompleteTasks.Add("Verification indicated incomplete status");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Check if output contains a verification request
+    /// </summary>
+    public static bool IsVerificationRequest(string output)
+    {
+        return output.Contains("---FINAL_VERIFICATION_REQUEST---", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Check if output contains a verification result
+    /// </summary>
+    public static bool HasVerificationResult(string output)
+    {
+        return Regex.IsMatch(output, @"OVERALL_STATUS:\s*(COMPLETE|INCOMPLETE)", RegexOptions.IgnoreCase);
+    }
+}
