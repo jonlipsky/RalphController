@@ -12,6 +12,7 @@ public class LoopController : IDisposable
     private readonly CircuitBreaker _circuitBreaker;
     private readonly ResponseAnalyzer _responseAnalyzer;
     private readonly RateLimiter _rateLimiter;
+    private readonly ModelSelector _modelSelector;
     private AIProcess? _currentProcess;
     private OllamaClient? _ollamaClient;
     private CancellationTokenSource? _loopCts;
@@ -40,8 +41,20 @@ public class LoopController : IDisposable
     /// <summary>Rate limiter for API call management</summary>
     public RateLimiter RateLimiter => _rateLimiter;
 
+    /// <summary>Model selector for multi-model support</summary>
+    public ModelSelector ModelSelector => _modelSelector;
+
     /// <summary>Fired when an iteration starts</summary>
     public event Action<int>? OnIterationStart;
+
+    /// <summary>Fired when the model switches (for multi-model mode)</summary>
+    public event Action<ModelSpec, string>? OnModelSwitch;
+
+    /// <summary>Fired when verification starts</summary>
+    public event Action<ModelSpec>? OnVerificationStart;
+
+    /// <summary>Fired when verification completes (passed, filesChanged)</summary>
+    public event Action<bool, int>? OnVerificationComplete;
 
     /// <summary>Fired when an iteration completes</summary>
     public event Action<int, AIResult>? OnIterationComplete;
@@ -65,6 +78,7 @@ public class LoopController : IDisposable
         _circuitBreaker = new CircuitBreaker();
         _responseAnalyzer = new ResponseAnalyzer();
         _rateLimiter = new RateLimiter(config.MaxCallsPerHour);
+        _modelSelector = new ModelSelector(config.MultiModel, config.ProviderConfig);
 
         // Wire up circuit breaker events
         _circuitBreaker.OnStateChanged += (state, reason) =>
@@ -74,6 +88,11 @@ public class LoopController : IDisposable
                 OnError?.Invoke($"Circuit breaker opened: {reason}");
             }
         };
+
+        // Wire up model selector events
+        _modelSelector.OnModelSwitch += (model, reason) => OnModelSwitch?.Invoke(model, reason);
+        _modelSelector.OnVerificationStart += model => OnVerificationStart?.Invoke(model);
+        _modelSelector.OnVerificationComplete += (passed, filesChanged) => OnVerificationComplete?.Invoke(passed, filesChanged);
     }
 
     /// <summary>
@@ -92,6 +111,7 @@ public class LoopController : IDisposable
 
         _loopCts = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation);
         _statistics.Reset();
+        _modelSelector.Reset();
 
         try
         {
@@ -263,13 +283,28 @@ public class LoopController : IDisposable
             prompt = await GetPromptAsync();
         }
 
+        // Get current provider from ModelSelector (handles multi-model)
+        var currentProvider = _modelSelector.GetCurrentProvider();
+        var currentProviderConfig = _modelSelector.GetCurrentProviderConfig();
+        var currentModel = _modelSelector.GetCurrentModel();
+        var isVerification = _modelSelector.IsVerificationIteration;
+
+        if (isVerification && currentModel != null)
+        {
+            OnOutput?.Invoke($"[Verification] Running with {currentModel.DisplayName}...");
+        }
+        else if (currentModel != null && _config.MultiModel?.IsEnabled == true)
+        {
+            OnOutput?.Invoke($"[Model: {currentModel.DisplayName}]");
+        }
+
         // Create and run process - use OllamaClient for Ollama provider
         AIResult result;
-        if (_config.Provider == AIProvider.Ollama)
+        if (currentProvider == AIProvider.Ollama)
         {
             // For Ollama, use OllamaClient with streaming support
-            var baseUrl = _config.ProviderConfig.ExecutablePath ?? "http://localhost:11434";
-            var model = _config.ProviderConfig.Arguments ?? "llama3.1:8b";
+            var baseUrl = currentProviderConfig.ExecutablePath ?? "http://localhost:11434";
+            var model = currentProviderConfig.Arguments ?? "llama3.1:8b";
 
             _ollamaClient = new OllamaClient(baseUrl, model, _config.TargetDirectory);
             _ollamaClient.OnOutput += text => OnOutput?.Invoke(text);
@@ -300,8 +335,9 @@ public class LoopController : IDisposable
         }
         else
         {
-            // For other providers, use AIProcess
-            _currentProcess = new AIProcess(_config);
+            // For other providers, use AIProcess with dynamic config
+            var dynamicConfig = _config with { ProviderConfig = currentProviderConfig, Provider = currentProvider };
+            _currentProcess = new AIProcess(dynamicConfig);
             _currentProcess.OnOutput += line => OnOutput?.Invoke(line);
             _currentProcess.OnError += line => OnError?.Invoke(line);
 
@@ -319,13 +355,35 @@ public class LoopController : IDisposable
         _statistics.CompleteIteration(result.Success);
         OnIterationComplete?.Invoke(_statistics.CurrentIteration, result);
 
-        // Count modified files for circuit breaker
+        // Count modified files for circuit breaker and verification
         var filesModified = CountModifiedFiles();
 
         // Record result with circuit breaker
         if (_config.EnableCircuitBreaker)
         {
             _circuitBreaker.RecordResult(result, filesModified);
+        }
+
+        // Handle multi-model logic (rotation, verification)
+        _modelSelector.AfterIteration(filesModified);
+
+        // Check if this was a verification iteration
+        if (isVerification)
+        {
+            var verificationPassed = _modelSelector.CheckVerificationPassed(filesModified);
+            if (verificationPassed)
+            {
+                OnOutput?.Invoke("[Verification PASSED] No changes made - task complete!");
+                Stop();
+                return;
+            }
+            else
+            {
+                OnOutput?.Invoke($"[Verification FAILED] Verifier made changes - continuing work...");
+                _modelSelector.ResetVerification();
+                // Don't stop - continue loop with primary model
+                return;
+            }
         }
 
         // Analyze response for completion signals
@@ -335,14 +393,28 @@ public class LoopController : IDisposable
 
             if (analysis.ShouldExit && _config.AutoExitOnCompletion)
             {
-                OnOutput?.Invoke($"Completion detected: {analysis.ExitReason}");
-                Stop();
+                // Check if we need to run verification first
+                if (_config.MultiModel?.Strategy == ModelSwitchStrategy.Verification)
+                {
+                    _modelSelector.OnCompletionDetected(filesModified);
+                    OnOutput?.Invoke($"Completion detected: {analysis.ExitReason} - running verification...");
+                    // Don't stop - let next iteration run with verifier
+                }
+                else
+                {
+                    OnOutput?.Invoke($"Completion detected: {analysis.ExitReason}");
+                    Stop();
+                }
             }
         }
 
+        // Handle rate limits with fallback
         var rateLimitInfo = ResponseAnalyzer.TryDetectRateLimit(result);
         if (rateLimitInfo is not null)
         {
+            // Notify model selector for fallback strategy
+            _modelSelector.OnIterationFailed(isRateLimit: true);
+
             var resetAt = rateLimitInfo.ResetAt ?? DateTimeOffset.UtcNow.AddMinutes(30);
             _providerRateLimitUntil = resetAt;
             _providerRateLimitMessage = rateLimitInfo.Message;
@@ -357,6 +429,11 @@ public class LoopController : IDisposable
                 : $"Provider rate limit detected: {_providerRateLimitMessage}";
 
             OnOutput?.Invoke($"{message}. Waiting until {resetText}.");
+        }
+        else if (!result.Success)
+        {
+            // Notify model selector for fallback strategy on failures
+            _modelSelector.OnIterationFailed(isRateLimit: false);
         }
     }
 

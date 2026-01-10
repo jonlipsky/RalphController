@@ -20,6 +20,36 @@ static string? NormalizeOpenCodeModel(string? model)
     return $"ollama/{model}";
 }
 
+static Task<List<string>> GetClaudeModels()
+{
+    // Claude CLI uses --model with aliases or full model names
+    // Aliases: sonnet, opus, haiku (resolve to latest versions)
+    // Full names: claude-sonnet-4-5-20250929, etc.
+    var models = new List<string>
+    {
+        "sonnet",           // Latest Sonnet (recommended for most tasks)
+        "opus",             // Latest Opus (most capable)
+        "haiku",            // Latest Haiku (fastest)
+        "claude-sonnet-4",  // Claude 4 Sonnet
+        "claude-opus-4"     // Claude 4 Opus
+    };
+    return Task.FromResult(models);
+}
+
+static Task<List<string>> GetCodexModels()
+{
+    // Codex CLI uses --model or -m flag
+    // Common models include o3, o4-mini, etc.
+    var models = new List<string>
+    {
+        "o3",               // OpenAI o3
+        "o4-mini",          // OpenAI o4-mini
+        "codex-1",          // Codex-1
+        "gpt-4.1"           // GPT-4.1
+    };
+    return Task.FromResult(models);
+}
+
 static async Task<List<string>> GetOpenCodeModels()
 {
     var psi = new ProcessStartInfo
@@ -531,6 +561,88 @@ else
 
 AnsiConsole.MarkupLine($"[green]Provider:[/] {provider}");
 
+// For Claude, handle model selection
+string? claudeModel = null;
+if (provider == AIProvider.Claude)
+{
+    if (!string.IsNullOrEmpty(modelFromArgs))
+    {
+        // Use command line argument
+        claudeModel = modelFromArgs;
+        projectSettings.ClaudeModel = claudeModel;
+    }
+    else if (!freshMode && !string.IsNullOrEmpty(projectSettings.ClaudeModel))
+    {
+        // Use saved model
+        claudeModel = projectSettings.ClaudeModel;
+        AnsiConsole.MarkupLine($"[dim]Using saved model: {claudeModel}[/]");
+    }
+    else
+    {
+        // Get available models dynamically
+        var claudeModels = await GetClaudeModels();
+        claudeModels.Add("Enter custom model...");
+
+        claudeModel = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Select Claude model:[/]")
+                .PageSize(10)
+                .AddChoices(claudeModels));
+
+        if (claudeModel == "Enter custom model...")
+        {
+            claudeModel = AnsiConsole.Prompt(
+                new TextPrompt<string>("[yellow]Enter model name:[/]")
+                    .DefaultValue("claude-sonnet-4"));
+        }
+
+        projectSettings.ClaudeModel = claudeModel;
+    }
+
+    AnsiConsole.MarkupLine($"[green]Model:[/] {claudeModel}");
+}
+
+// For Codex, handle model selection
+string? codexModel = null;
+if (provider == AIProvider.Codex)
+{
+    if (!string.IsNullOrEmpty(modelFromArgs))
+    {
+        // Use command line argument
+        codexModel = modelFromArgs;
+        projectSettings.CodexModel = codexModel;
+    }
+    else if (!freshMode && !string.IsNullOrEmpty(projectSettings.CodexModel))
+    {
+        // Use saved model
+        codexModel = projectSettings.CodexModel;
+        AnsiConsole.MarkupLine($"[dim]Using saved model: {codexModel}[/]");
+    }
+    else
+    {
+        // Get available models dynamically
+        var codexModels = await GetCodexModels();
+        codexModels.Add("Enter custom model...");
+
+        codexModel = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Select Codex model:[/]")
+                .PageSize(10)
+                .AddChoices(codexModels));
+
+        if (codexModel == "Enter custom model...")
+        {
+            codexModel = AnsiConsole.Prompt(
+                new TextPrompt<string>("[yellow]Enter model name:[/]")
+                    .DefaultValue("o3"));
+        }
+
+        projectSettings.CodexModel = codexModel;
+    }
+
+    AnsiConsole.MarkupLine($"[green]Model:[/] {codexModel}");
+}
+
 // For Copilot, handle model selection
 string? copilotModel = null;
 if (provider == AIProvider.Copilot)
@@ -744,6 +856,169 @@ if (provider == AIProvider.Ollama)
     AnsiConsole.MarkupLine($"[green]Model:[/] {ollamaModel}");
 }
 
+// Ask about multi-model configuration (skip if --fresh and already configured, or in no-tui mode)
+MultiModelConfig? multiModelConfig = null;
+if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettings.MultiModel.IsEnabled))
+{
+    var multiModelChoice = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title("\n[yellow]Multi-model configuration:[/]")
+            .AddChoices(
+                "Single model (default)",
+                "Verification model - use a second model to verify completion",
+                "Round-robin rotation - alternate between models each iteration"));
+
+    if (multiModelChoice != "Single model (default)")
+    {
+        var strategy = multiModelChoice.StartsWith("Verification")
+            ? ModelSwitchStrategy.Verification
+            : ModelSwitchStrategy.RoundRobin;
+
+        // Create primary model spec from current selection
+        var primaryModel = new ModelSpec
+        {
+            Provider = provider,
+            Model = provider switch
+            {
+                AIProvider.Claude => claudeModel ?? "sonnet",
+                AIProvider.Codex => codexModel ?? "o3",
+                AIProvider.Copilot => copilotModel ?? "gpt-5",
+                AIProvider.OpenCode => openCodeModel ?? "",
+                AIProvider.Ollama => ollamaModel ?? "llama3.1:8b",
+                _ => ""
+            },
+            BaseUrl = provider == AIProvider.Ollama ? ollamaUrl : null,
+            Label = "Primary"
+        };
+
+        // Prompt for secondary model
+        AnsiConsole.MarkupLine($"\n[yellow]Select secondary model ({(strategy == ModelSwitchStrategy.Verification ? "verifier" : "rotation")}):[/]");
+
+        var secondaryProviderChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Secondary model provider:[/]")
+                .AddChoices(
+                    $"Same provider ({provider})",
+                    "Claude",
+                    "Codex",
+                    "Copilot",
+                    "OpenCode",
+                    "Ollama"));
+
+        AIProvider secondaryProvider;
+        string? secondaryModel = null;
+        string? secondaryUrl = null;
+
+        if (secondaryProviderChoice.StartsWith("Same provider"))
+        {
+            secondaryProvider = provider;
+            secondaryUrl = provider == AIProvider.Ollama ? ollamaUrl : null;
+        }
+        else
+        {
+            secondaryProvider = secondaryProviderChoice switch
+            {
+                "Claude" => AIProvider.Claude,
+                "Codex" => AIProvider.Codex,
+                "Copilot" => AIProvider.Copilot,
+                "OpenCode" => AIProvider.OpenCode,
+                "Ollama" => AIProvider.Ollama,
+                _ => provider
+            };
+        }
+
+        // Get secondary model based on provider
+        switch (secondaryProvider)
+        {
+            case AIProvider.Claude:
+                var clModels = await GetClaudeModels();
+                secondaryModel = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("[yellow]Select Claude model:[/]")
+                        .AddChoices(clModels));
+                break;
+
+            case AIProvider.Codex:
+                var cxModels = await GetCodexModels();
+                secondaryModel = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("[yellow]Select Codex model:[/]")
+                        .AddChoices(cxModels));
+                break;
+
+            case AIProvider.Copilot:
+                secondaryModel = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("[yellow]Select Copilot model:[/]")
+                        .AddChoices(
+                            "gpt-5", "gpt-5-mini", "gpt-5.1", "gpt-5.2",
+                            "claude-sonnet-4", "claude-opus-4.5"));
+                break;
+
+            case AIProvider.OpenCode:
+                var ocModels = await GetOpenCodeModels();
+                secondaryModel = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("[yellow]Select OpenCode model:[/]")
+                        .PageSize(10)
+                        .AddChoices(ocModels.Take(20)));
+                break;
+
+            case AIProvider.Ollama:
+                if (secondaryUrl == null)
+                {
+                    secondaryUrl = AnsiConsole.Prompt(
+                        new TextPrompt<string>("[yellow]Ollama API URL:[/]")
+                            .DefaultValue(ollamaUrl ?? "http://localhost:11434"));
+                }
+                var olModels = await GetOllamaModels(secondaryUrl);
+                if (olModels.Count > 0)
+                {
+                    secondaryModel = AnsiConsole.Prompt(
+                        new SelectionPrompt<string>()
+                            .Title("[yellow]Select Ollama model:[/]")
+                            .PageSize(10)
+                            .AddChoices(olModels));
+                }
+                else
+                {
+                    secondaryModel = AnsiConsole.Prompt(
+                        new TextPrompt<string>("[yellow]Enter model name:[/]")
+                            .DefaultValue("llama3.1:8b"));
+                }
+                break;
+        }
+
+        var secondaryModelSpec = new ModelSpec
+        {
+            Provider = secondaryProvider,
+            Model = secondaryModel ?? "",
+            BaseUrl = secondaryUrl,
+            Label = strategy == ModelSwitchStrategy.Verification ? "Verifier" : "Secondary"
+        };
+
+        multiModelConfig = new MultiModelConfig
+        {
+            Strategy = strategy,
+            Models = new List<ModelSpec> { primaryModel, secondaryModelSpec },
+            Verification = strategy == ModelSwitchStrategy.Verification
+                ? new VerificationConfig { VerifierIndex = 1, Trigger = VerificationTrigger.CompletionSignal }
+                : null
+        };
+
+        projectSettings.MultiModel = multiModelConfig;
+
+        AnsiConsole.MarkupLine($"[green]Multi-model:[/] {strategy} - {primaryModel.DisplayName} + {secondaryModelSpec.DisplayName}");
+    }
+}
+else if (!freshMode && projectSettings.MultiModel?.IsEnabled == true)
+{
+    // Use saved multi-model config
+    multiModelConfig = projectSettings.MultiModel;
+    var modelNames = string.Join(" + ", multiModelConfig.Models.Select(m => m.DisplayName));
+    AnsiConsole.MarkupLine($"[dim]Using saved multi-model config: {multiModelConfig.Strategy} - {modelNames}[/]");
+}
+
 // Save provider to project settings if it changed or was newly selected
 if (providerWasSelected || (providerFromArgs.HasValue && providerFromArgs != savedProvider))
 {
@@ -757,7 +1032,8 @@ globalSettings.Save();
 // Create configuration
 var providerConfig = provider switch
 {
-    AIProvider.Codex => AIProviderConfig.ForCodex(),
+    AIProvider.Claude => AIProviderConfig.ForClaude(model: claudeModel),
+    AIProvider.Codex => AIProviderConfig.ForCodex(model: codexModel),
     AIProvider.Copilot => AIProviderConfig.ForCopilot(model: copilotModel),
     AIProvider.OpenCode => AIProviderConfig.ForOpenCode(model: openCodeModel),
     AIProvider.Ollama => AIProviderConfig.ForOllama(baseUrl: ollamaUrl, model: ollamaModel),
@@ -768,7 +1044,8 @@ var config = new RalphConfig
 {
     TargetDirectory = targetDir,
     Provider = provider,
-    ProviderConfig = providerConfig
+    ProviderConfig = providerConfig,
+    MultiModel = multiModelConfig
 };
 
 // Handle init mode - regenerate all project files from new spec

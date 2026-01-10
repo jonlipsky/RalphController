@@ -45,23 +45,29 @@ public record AIProviderConfig
     /// <summary>Whether output is in stream-json format that needs parsing</summary>
     public bool UsesStreamJson { get; init; } = false;
 
-    public static AIProviderConfig ForClaude(string? executablePath = null) => new()
+    public static AIProviderConfig ForClaude(string? executablePath = null, string? model = null) => new()
     {
         Provider = AIProvider.Claude,
         ExecutablePath = executablePath ?? "claude",
         // Use stream-json with partial messages for real-time streaming
-        Arguments = "-p --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages",
+        // Add --model flag if model specified
+        Arguments = string.IsNullOrWhiteSpace(model)
+            ? "-p --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages"
+            : $"-p --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages --model {model}",
         UsesStdin = true,
         UsesStreamJson = true
     };
 
-    public static AIProviderConfig ForCodex(string? executablePath = null) => new()
+    public static AIProviderConfig ForCodex(string? executablePath = null, string? model = null) => new()
     {
         Provider = AIProvider.Codex,
         ExecutablePath = executablePath ?? "codex",
         // exec for non-interactive mode, - to read prompt from stdin
         // --dangerously-bypass-approvals-and-sandbox for full auto mode
-        Arguments = "exec --dangerously-bypass-approvals-and-sandbox -",
+        // Add --model flag if model specified
+        Arguments = string.IsNullOrWhiteSpace(model)
+            ? "exec --dangerously-bypass-approvals-and-sandbox -"
+            : $"exec --dangerously-bypass-approvals-and-sandbox --model {model} -",
         UsesStdin = true  // Codex exec reads from stdin when using "-"
     };
 

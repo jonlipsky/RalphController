@@ -14,6 +14,12 @@ public class ProjectSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AIProvider? Provider { get; set; }
 
+    /// <summary>Model to use for Claude (e.g., claude-sonnet-4, claude-opus-4)</summary>
+    public string? ClaudeModel { get; set; }
+
+    /// <summary>Model to use for Codex (e.g., codex-1, o3)</summary>
+    public string? CodexModel { get; set; }
+
     /// <summary>Model to use for Copilot (e.g., gpt-5, claude-sonnet-4)</summary>
     public string? CopilotModel { get; set; }
 
@@ -28,6 +34,9 @@ public class ProjectSettings
 
     /// <summary>Custom executable path for the provider (optional)</summary>
     public string? ExecutablePath { get; set; }
+
+    /// <summary>Multi-model configuration (rotation, verification)</summary>
+    public MultiModelConfig? MultiModel { get; set; }
 
     /// <summary>When these settings were last updated</summary>
     public DateTime? LastUpdated { get; set; }

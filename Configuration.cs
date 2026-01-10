@@ -16,6 +16,9 @@ public record RalphConfig
     /// <summary>Provider-specific configuration</summary>
     public AIProviderConfig ProviderConfig { get; init; } = AIProviderConfig.ForClaude();
 
+    /// <summary>Multi-model configuration (rotation, verification)</summary>
+    public MultiModelConfig? MultiModel { get; init; }
+
     /// <summary>Path to AI CLI executable (overrides provider default)</summary>
     public string? ExecutablePath { get; init; }
 

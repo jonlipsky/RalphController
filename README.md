@@ -20,7 +20,8 @@ RalphController automates the Ralph Wiggum technique:
 - **Live Streaming**: See AI output as it's generated, not just after completion
 - **Project Scaffolding**: Generate all project files from a description or spec file
 - **Re-initialization**: Use `--init` to regenerate project files with new requirements
-- **Multi-Provider**: Supports Claude, Codex, GitHub Copilot, and OpenCode
+- **Multi-Provider**: Supports Claude, Codex, GitHub Copilot, OpenCode, and Ollama
+- **Multi-Model**: Rotate between models or use verification model for completion checking
 - **Provider Persistence**: Remembers your provider choice per project in `.ralph.json`
 - **Global Tool**: Install as `ralph` command, run from any directory
 - **Pause/Resume/Stop**: Full control over the loop execution
@@ -357,6 +358,7 @@ RalphController uses sensible defaults but can be customized:
 | Circuit Breaker | Enabled | Detect and stop on stagnation |
 | Response Analyzer | Enabled | Detect completion signals |
 | Auto Exit | Enabled | Exit when completion detected |
+| Multi-Model | Disabled | See Multi-Model Support section |
 
 ## Safety Features
 
@@ -391,6 +393,111 @@ EXIT_SIGNAL: true | false
 NEXT_STEP: <what to do next>
 ---END_STATUS---
 ```
+
+## Multi-Model Support
+
+RalphController supports running multiple AI models in a single session with two strategies:
+
+### Model Rotation (Round Robin)
+
+Cycle through different models each iteration. Useful for:
+- Cost optimization (alternate expensive/cheap models)
+- Different perspectives on problem-solving
+- Avoiding model-specific blind spots
+
+### Verification Mode
+
+When the primary model signals completion, run the same prompt with a verification model. If the verifier makes no changes, the task is truly complete. If it makes changes, continue working.
+
+This prevents premature completion by getting a "second opinion" from a different model.
+
+### Interactive Setup
+
+When starting Ralph, you'll be prompted to configure multi-model after selecting your primary model:
+
+```
+Multi-model configuration:
+> Single model (default)
+  Verification model - use a second model to verify completion
+  Round-robin rotation - alternate between models each iteration
+```
+
+Select a strategy and then choose your secondary model from any supported provider.
+
+### Manual Configuration
+
+You can also configure multi-model directly in your `.ralph.json`:
+
+**Round Robin (Opus ↔ Sonnet):**
+```json
+{
+  "multiModel": {
+    "strategy": "RoundRobin",
+    "rotateEveryN": 1,
+    "models": [
+      { "provider": "Claude", "model": "opus", "label": "Opus" },
+      { "provider": "Claude", "model": "sonnet", "label": "Sonnet" }
+    ]
+  }
+}
+```
+
+**Verification (Sonnet primary, Opus verifier):**
+```json
+{
+  "multiModel": {
+    "strategy": "Verification",
+    "models": [
+      { "provider": "Claude", "model": "sonnet", "label": "Primary" },
+      { "provider": "Claude", "model": "opus", "label": "Verifier" }
+    ],
+    "verification": {
+      "verifierIndex": 1,
+      "trigger": "CompletionSignal",
+      "maxVerificationAttempts": 3
+    }
+  }
+}
+```
+
+**Cross-Provider (Claude + Ollama):**
+```json
+{
+  "multiModel": {
+    "strategy": "RoundRobin",
+    "models": [
+      { "provider": "Claude", "model": "sonnet" },
+      { "provider": "Ollama", "model": "qwen2.5-coder:32b", "baseUrl": "http://localhost:11434" }
+    ]
+  }
+}
+```
+
+### Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `None` | Single model (default behavior) |
+| `RoundRobin` | Cycle through models each N iterations |
+| `Verification` | Use secondary model to verify completion |
+| `Fallback` | Switch to backup model on failure/rate limit |
+
+### Verification Triggers
+
+| Trigger | Description |
+|---------|-------------|
+| `CompletionSignal` | When ResponseAnalyzer detects task completion |
+| `EveryNIterations` | Run verification every N iterations |
+| `Manual` | User-triggered (future feature) |
+
+### How Verification Works
+
+1. Primary model runs normally
+2. When completion is detected, verification model runs the **same prompt**
+3. If verifier makes **no file changes** → task verified complete, exit
+4. If verifier makes **any changes** → not truly done, continue with primary
+
+This elegant approach requires no special verification prompts - just run another model and see if it agrees nothing needs to change.
 
 ## Testing & Debug Modes
 
