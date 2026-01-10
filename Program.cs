@@ -281,12 +281,17 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             break;
     }
 
+    // Create a descriptive label using the actual model name
+    var displayLabel = !string.IsNullOrEmpty(model)
+        ? model  // Use actual model name (e.g., "sonnet", "opus", "gpt-4o")
+        : selectedProvider.ToString();  // Fallback to provider name
+
     return new ModelSpec
     {
         Provider = selectedProvider,
         Model = model ?? "",
         BaseUrl = url,
-        Label = label
+        Label = displayLabel
     };
 }
 
@@ -1220,22 +1225,24 @@ if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettin
             : ModelSwitchStrategy.RoundRobin;
 
         // Create primary model spec from current selection
+        var primaryModelName = provider switch
+        {
+            AIProvider.Claude => claudeModel ?? "sonnet",
+            AIProvider.Codex => codexModel ?? "o3",
+            AIProvider.Copilot => copilotModel ?? "gpt-5",
+            AIProvider.Gemini => geminiModel ?? "gemini-2.5-pro",
+            AIProvider.Cursor => cursorModel ?? "claude-sonnet",
+            AIProvider.OpenCode => openCodeModel ?? "",
+            AIProvider.Ollama => ollamaModel ?? "llama3.1:8b",
+            _ => ""
+        };
+
         var primaryModel = new ModelSpec
         {
             Provider = provider,
-            Model = provider switch
-            {
-                AIProvider.Claude => claudeModel ?? "sonnet",
-                AIProvider.Codex => codexModel ?? "o3",
-                AIProvider.Copilot => copilotModel ?? "gpt-5",
-                AIProvider.Gemini => geminiModel ?? "gemini-2.5-pro",
-                AIProvider.Cursor => cursorModel ?? "claude-sonnet",
-                AIProvider.OpenCode => openCodeModel ?? "",
-                AIProvider.Ollama => ollamaModel ?? "llama3.1:8b",
-                _ => ""
-            },
+            Model = primaryModelName,
             BaseUrl = provider == AIProvider.Ollama ? ollamaUrl : null,
-            Label = "Primary"
+            Label = !string.IsNullOrEmpty(primaryModelName) ? primaryModelName : provider.ToString()
         };
 
         var modelList = new List<ModelSpec> { primaryModel };
