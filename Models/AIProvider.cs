@@ -17,6 +17,9 @@ public enum AIProvider
     /// <summary>Google Gemini CLI</summary>
     Gemini,
 
+    /// <summary>Cursor AI Editor CLI</summary>
+    Cursor,
+
     /// <summary>OpenCode CLI</summary>
     OpenCode,
 
@@ -109,6 +112,19 @@ public record AIProviderConfig
         UsesStdin = false,
         UsesPromptArgument = true,  // Prompt is passed as positional argument
         UsesStreamJson = true
+    };
+
+    public static AIProviderConfig ForCursor(string? executablePath = null, string? model = null) => new()
+    {
+        Provider = AIProvider.Cursor,
+        ExecutablePath = executablePath ?? "cursor",
+        // Cursor agent mode with auto-approve
+        // --model to specify which model
+        Arguments = string.IsNullOrWhiteSpace(model)
+            ? "agent --auto-approve"
+            : $"agent --auto-approve --model {model}",
+        UsesStdin = false,
+        UsesPromptArgument = true  // Prompt is passed as argument
     };
 
     public static AIProviderConfig ForOllama(string? baseUrl = null, string? model = null) => new()

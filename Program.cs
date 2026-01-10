@@ -65,6 +65,21 @@ static Task<List<string>> GetGeminiModels()
     return Task.FromResult(models);
 }
 
+static Task<List<string>> GetCursorModels()
+{
+    // Cursor supports various models through its agent mode
+    var models = new List<string>
+    {
+        "claude-sonnet",        // Claude Sonnet (recommended)
+        "claude-opus",          // Claude Opus
+        "gpt-4",                // GPT-4
+        "gpt-4-turbo",          // GPT-4 Turbo
+        "gpt-4o",               // GPT-4o
+        "cursor-small"          // Cursor's own small model
+    };
+    return Task.FromResult(models);
+}
+
 static bool IsProviderInstalled(AIProvider provider)
 {
     var command = provider switch
@@ -73,6 +88,7 @@ static bool IsProviderInstalled(AIProvider provider)
         AIProvider.Codex => "codex",
         AIProvider.Copilot => "copilot",
         AIProvider.Gemini => "gemini",
+        AIProvider.Cursor => "cursor",
         AIProvider.OpenCode => "opencode",
         AIProvider.Ollama => null,  // Ollama uses HTTP, not CLI - always available
         _ => null
@@ -202,6 +218,21 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
                 model = AnsiConsole.Prompt(
                     new TextPrompt<string>("[yellow]Enter model name:[/]")
                         .DefaultValue("gemini-2.5-pro"));
+            }
+            break;
+
+        case AIProvider.Cursor:
+            var cursorModels = await GetCursorModels();
+            cursorModels.Add("Enter custom model...");
+            model = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[yellow]Select Cursor model:[/]")
+                    .AddChoices(cursorModels));
+            if (model == "Enter custom model...")
+            {
+                model = AnsiConsole.Prompt(
+                    new TextPrompt<string>("[yellow]Enter model name:[/]")
+                        .DefaultValue("claude-sonnet"));
             }
             break;
 
@@ -589,6 +620,7 @@ for (int i = 0; i < args.Length; i++)
             "claude" => AIProvider.Claude,
             "copilot" => AIProvider.Copilot,
             "gemini" => AIProvider.Gemini,
+            "cursor" => AIProvider.Cursor,
             "opencode" => AIProvider.OpenCode,
             "ollama" => AIProvider.Ollama,
             _ => null
@@ -619,6 +651,10 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--gemini")
     {
         providerFromArgs = AIProvider.Gemini;
+    }
+    else if (args[i] == "--cursor")
+    {
+        providerFromArgs = AIProvider.Cursor;
     }
     else if (args[i] == "--opencode")
     {
@@ -910,6 +946,47 @@ if (provider == AIProvider.Gemini)
     AnsiConsole.MarkupLine($"[green]Model:[/] {geminiModel}");
 }
 
+// For Cursor, handle model selection
+string? cursorModel = null;
+if (provider == AIProvider.Cursor)
+{
+    if (!string.IsNullOrEmpty(modelFromArgs))
+    {
+        // Use command line argument
+        cursorModel = modelFromArgs;
+        projectSettings.CursorModel = cursorModel;
+    }
+    else if (!freshMode && !string.IsNullOrEmpty(projectSettings.CursorModel))
+    {
+        // Use saved model
+        cursorModel = projectSettings.CursorModel;
+        AnsiConsole.MarkupLine($"[dim]Using saved model: {cursorModel}[/]");
+    }
+    else
+    {
+        // Get available models dynamically
+        var cursorModels = await GetCursorModels();
+        cursorModels.Add("Enter custom model...");
+
+        cursorModel = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[yellow]Select Cursor model:[/]")
+                .PageSize(10)
+                .AddChoices(cursorModels));
+
+        if (cursorModel == "Enter custom model...")
+        {
+            cursorModel = AnsiConsole.Prompt(
+                new TextPrompt<string>("[yellow]Enter model name:[/]")
+                    .DefaultValue("claude-sonnet"));
+        }
+
+        projectSettings.CursorModel = cursorModel;
+    }
+
+    AnsiConsole.MarkupLine($"[green]Model:[/] {cursorModel}");
+}
+
 // For Copilot, handle model selection
 string? copilotModel = null;
 if (provider == AIProvider.Copilot)
@@ -1151,6 +1228,7 @@ if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettin
                 AIProvider.Codex => codexModel ?? "o3",
                 AIProvider.Copilot => copilotModel ?? "gpt-5",
                 AIProvider.Gemini => geminiModel ?? "gemini-2.5-pro",
+                AIProvider.Cursor => cursorModel ?? "claude-sonnet",
                 AIProvider.OpenCode => openCodeModel ?? "",
                 AIProvider.Ollama => ollamaModel ?? "llama3.1:8b",
                 _ => ""
@@ -1232,6 +1310,7 @@ var providerConfig = provider switch
     AIProvider.Codex => AIProviderConfig.ForCodex(model: codexModel),
     AIProvider.Copilot => AIProviderConfig.ForCopilot(model: copilotModel),
     AIProvider.Gemini => AIProviderConfig.ForGemini(model: geminiModel),
+    AIProvider.Cursor => AIProviderConfig.ForCursor(model: cursorModel),
     AIProvider.OpenCode => AIProviderConfig.ForOpenCode(model: openCodeModel),
     AIProvider.Ollama => AIProviderConfig.ForOllama(baseUrl: ollamaUrl, model: ollamaModel),
     _ => AIProviderConfig.ForClaude()
