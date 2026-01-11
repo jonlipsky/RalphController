@@ -16,6 +16,7 @@ public class LoopController : IDisposable
     private AIProcess? _currentProcess;
     private OllamaClient? _ollamaClient;
     private CancellationTokenSource? _loopCts;
+    private CancellationTokenSource? _iterationSkipCts;
     private TaskCompletionSource? _pauseTcs;
     private string? _injectedPrompt;
     private readonly object _stateLock = new();
@@ -219,6 +220,20 @@ public class LoopController : IDisposable
     }
 
     /// <summary>
+    /// Skip the current iteration and move to the next one
+    /// </summary>
+    public void SkipIteration()
+    {
+        if (State != LoopState.Running)
+        {
+            return;
+        }
+
+        OnOutput?.Invoke("[Skip] Skipping current iteration...");
+        _iterationSkipCts?.Cancel();
+    }
+
+    /// <summary>
     /// Inject a one-time prompt to use for the next iteration
     /// </summary>
     public void InjectPrompt(string prompt)
@@ -400,7 +415,8 @@ public class LoopController : IDisposable
         // Apply inactivity timeout if configured (timeout resets on any output)
         AIResult result;
         using var timeoutCts = new CancellationTokenSource();
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        _iterationSkipCts = new CancellationTokenSource();
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token, _iterationSkipCts.Token);
         var iterationToken = linkedCts.Token;
 
         // Track last activity for inactivity-based timeout
@@ -504,6 +520,38 @@ public class LoopController : IDisposable
 
             // Cancel the timeout checker once we're done
             timeoutCts.Cancel();
+        }
+        catch (OperationCanceledException) when (_iterationSkipCts?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+        {
+            // User skipped the iteration - log and continue to next iteration
+            var providerName = currentModel?.DisplayName ?? currentProvider.ToString();
+            OnOutput?.Invoke("");
+            OnOutput?.Invoke("╔══════════════════════════════════════════════════════════════╗");
+            OnOutput?.Invoke($"║  ITERATION SKIPPED: {providerName,-40} ║");
+            OnOutput?.Invoke("╚══════════════════════════════════════════════════════════════╝");
+            OnOutput?.Invoke("");
+
+            // Create a skipped result
+            result = new AIResult
+            {
+                Success = false,
+                ExitCode = -3, // Use -3 to indicate skip
+                Output = "",
+                Error = "Iteration skipped by user"
+            };
+
+            // Record iteration as skipped but continue
+            _statistics.CompleteIteration(false);
+            OnIterationComplete?.Invoke(_statistics.CurrentIteration, result);
+
+            // Move to next model if in multi-model mode
+            if (_config.MultiModel?.IsEnabled == true)
+            {
+                _modelSelector.AfterIteration(0);
+                OnOutput?.Invoke("[Loop] Rotating to next model and continuing...");
+            }
+
+            return; // Continue to next iteration
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -916,6 +964,8 @@ public class LoopController : IDisposable
 
         _loopCts?.Cancel();
         _loopCts?.Dispose();
+        _iterationSkipCts?.Cancel();
+        _iterationSkipCts?.Dispose();
         _currentProcess?.Dispose();
         _ollamaClient?.Dispose();
         _pauseTcs?.TrySetCanceled();

@@ -224,7 +224,7 @@ public class ConsoleUI : IDisposable
         // Double brackets to escape them in Spectre.Console markup
         var controls = _controller.State switch
         {
-            LoopState.Running => "[[P]]ause  [[S]]top  [[F]]orce Stop  [[I]]nject  [[Q]]uit",
+            LoopState.Running => "[[P]]ause  [[N]]ext  [[S]]top  [[F]]orce Stop  [[I]]nject  [[Q]]uit",
             LoopState.Paused => "[[R]]esume  [[S]]top  [[I]]nject  [[Q]]uit",
             LoopState.Idle => "[[Enter]] Start  [[Q]]uit",
             LoopState.Stopping => "[[F]]orce Stop  [[Q]]uit",
@@ -266,6 +266,14 @@ public class ConsoleUI : IDisposable
                 {
                     _controller.Resume();
                     AddOutputLine("[green]>>> Loop resumed[/]");
+                }
+                break;
+
+            case 'n':
+                if (_controller.State == LoopState.Running)
+                {
+                    _controller.SkipIteration();
+                    AddOutputLine("[yellow]>>> Skipping to next iteration...[/]");
                 }
                 break;
 
