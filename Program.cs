@@ -155,9 +155,10 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
 {
     // Get installed providers and build choices
     var installedProviders = GetInstalledProviders();
-    var providerChoices = installedProviders.Select(p => p.ToString()).ToList();
+    var providerChoices = new List<string> { "← Go back" };
+    providerChoices.AddRange(installedProviders.Select(p => p.ToString()));
 
-    if (providerChoices.Count == 0)
+    if (installedProviders.Count == 0)
     {
         providerChoices.Add("Ollama");  // Always available via HTTP
     }
@@ -167,6 +168,11 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             .Title($"[yellow]{label} - Select provider:[/]")
             .AddChoices(providerChoices));
 
+    if (providerChoice == "← Go back")
+    {
+        return null;
+    }
+
     var selectedProvider = Enum.Parse<AIProvider>(providerChoice);
     string? model = null;
     string? url = null;
@@ -175,12 +181,14 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
     switch (selectedProvider)
     {
         case AIProvider.Claude:
-            var clModels = await GetClaudeModels();
+            var clModels = new List<string> { "← Go back" };
+            clModels.AddRange(await GetClaudeModels());
             clModels.Add("Enter custom model...");
             model = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select Claude model:[/]")
                     .AddChoices(clModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -190,12 +198,14 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             break;
 
         case AIProvider.Codex:
-            var cxModels = await GetCodexModels();
+            var cxModels = new List<string> { "← Go back" };
+            cxModels.AddRange(await GetCodexModels());
             cxModels.Add("Enter custom model...");
             model = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select Codex model:[/]")
                     .AddChoices(cxModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -207,6 +217,7 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
         case AIProvider.Copilot:
             var copilotModels = new List<string>
             {
+                "← Go back",
                 "gpt-5", "gpt-5-mini", "gpt-5.1", "gpt-5.2",
                 "claude-sonnet-4", "claude-opus-4.5",
                 "Enter custom model..."
@@ -215,6 +226,7 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select Copilot model:[/]")
                     .AddChoices(copilotModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -224,12 +236,14 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             break;
 
         case AIProvider.Gemini:
-            var gmModels = await GetGeminiModels();
+            var gmModels = new List<string> { "← Go back" };
+            gmModels.AddRange(await GetGeminiModels());
             gmModels.Add("Enter custom model...");
             model = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select Gemini model:[/]")
                     .AddChoices(gmModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -239,12 +253,14 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             break;
 
         case AIProvider.Cursor:
-            var cursorModels = await GetCursorModels();
+            var cursorModels = new List<string> { "← Go back" };
+            cursorModels.AddRange(await GetCursorModels());
             cursorModels.Add("Enter custom model...");
             model = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select Cursor model:[/]")
                     .AddChoices(cursorModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -254,13 +270,15 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             break;
 
         case AIProvider.OpenCode:
-            var ocModels = await GetOpenCodeModels();
+            var ocModels = new List<string> { "← Go back" };
+            ocModels.AddRange(await GetOpenCodeModels());
             ocModels.Add("Enter custom model...");
             model = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[yellow]Select OpenCode model:[/]")
                     .PageSize(15)
                     .AddChoices(ocModels));
+            if (model == "← Go back") return null;
             if (model == "Enter custom model...")
             {
                 model = AnsiConsole.Prompt(
@@ -271,17 +289,21 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
 
         case AIProvider.Ollama:
             url = AnsiConsole.Prompt(
-                new TextPrompt<string>("[yellow]Ollama API URL:[/]")
+                new TextPrompt<string>("[yellow]Ollama API URL (or 'back' to go back):[/]")
                     .DefaultValue(defaultOllamaUrl ?? "http://localhost:11434"));
+            if (url.Equals("back", StringComparison.OrdinalIgnoreCase)) return null;
             var olModels = await GetOllamaModels(url);
+            var olModelChoices = new List<string> { "← Go back" };
             if (olModels.Count > 0)
             {
-                olModels.Add("Enter custom model...");
+                olModelChoices.AddRange(olModels);
+                olModelChoices.Add("Enter custom model...");
                 model = AnsiConsole.Prompt(
                     new SelectionPrompt<string>()
                         .Title("[yellow]Select Ollama model:[/]")
                         .PageSize(15)
-                        .AddChoices(olModels));
+                        .AddChoices(olModelChoices));
+                if (model == "← Go back") return null;
                 if (model == "Enter custom model...")
                 {
                     model = AnsiConsole.Prompt(
@@ -292,8 +314,9 @@ static async Task<ModelSpec?> PromptForModelSpec(string label, string? defaultOl
             else
             {
                 model = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[yellow]Enter model name:[/]")
+                    new TextPrompt<string>("[yellow]Enter model name (or 'back' to go back):[/]")
                         .DefaultValue("llama3.1:8b"));
+                if (model.Equals("back", StringComparison.OrdinalIgnoreCase)) return null;
             }
             break;
     }
@@ -629,12 +652,36 @@ var initMode = false;
 string? modelFromArgs = null;
 string? apiUrlFromArgs = null;
 
+// Define valid arguments
+var validArgs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    "--provider", "--model", "--api-url", "--url",
+    "--codex", "--copilot", "--claude", "--gemini", "--cursor", "--opencode", "--ollama", "--lmstudio",
+    "--list-models", "--fresh", "--init", "--spec", "--no-tui", "--console",
+    "--test-streaming", "--single-run", "--test-aiprocess", "--test-output"
+};
+
 // Check for flags
 var listModels = false;
 var freshMode = false;
 var noTui = false;
+var unknownArgs = new List<string>();
+
 for (int i = 0; i < args.Length; i++)
 {
+    // Skip positional arguments (directory paths - don't start with -)
+    if (!args[i].StartsWith("-"))
+    {
+        continue;
+    }
+
+    // Check if this is a valid argument
+    if (!validArgs.Contains(args[i]))
+    {
+        unknownArgs.Add(args[i]);
+        continue;
+    }
+
     if (args[i] == "--provider" && i + 1 < args.Length)
     {
         providerFromArgs = args[i + 1].ToLower() switch
@@ -715,6 +762,22 @@ for (int i = 0; i < args.Length; i++)
     {
         noTui = true;
     }
+}
+
+// Check for unknown arguments
+if (unknownArgs.Count > 0)
+{
+    AnsiConsole.MarkupLine($"[red]Error: Unknown argument(s): {string.Join(", ", unknownArgs)}[/]");
+    AnsiConsole.MarkupLine("\n[yellow]Valid arguments:[/]");
+    AnsiConsole.MarkupLine("  [dim]--provider <name>[/]     Select AI provider (claude, codex, copilot, gemini, cursor, opencode, ollama)");
+    AnsiConsole.MarkupLine("  [dim]--model <name>[/]        Select model for the provider");
+    AnsiConsole.MarkupLine("  [dim]--api-url <url>[/]       API URL for Ollama/LMStudio");
+    AnsiConsole.MarkupLine("  [dim]--fresh[/]               Ignore saved settings, prompt for all options");
+    AnsiConsole.MarkupLine("  [dim]--init [[spec]][/]       Initialize/regenerate project files from spec");
+    AnsiConsole.MarkupLine("  [dim]--no-tui[/]              Run without TUI (plain console output)");
+    AnsiConsole.MarkupLine("  [dim]--list-models[/]         List available models");
+    AnsiConsole.MarkupLine("\n[dim]Provider shortcuts: --claude, --codex, --copilot, --gemini, --cursor, --opencode, --ollama, --lmstudio[/]");
+    return 1;
 }
 
 if (listModels)
@@ -1264,6 +1327,7 @@ if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettin
 
         var modelList = new List<ModelSpec> { primaryModel };
 
+        var cancelled = false;
         if (strategy == ModelSwitchStrategy.Verification)
         {
             // For verification, only need one verifier model
@@ -1272,6 +1336,12 @@ if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettin
             if (verifierModel != null)
             {
                 modelList.Add(verifierModel);
+            }
+            else
+            {
+                // User went back - cancel multi-model setup
+                cancelled = true;
+                AnsiConsole.MarkupLine("[dim]Multi-model configuration cancelled.[/]");
             }
         }
         else
@@ -1289,25 +1359,43 @@ if (!noTui && (freshMode || projectSettings.MultiModel == null || !projectSettin
                     modelList.Add(nextModel);
                     modelIndex++;
                 }
+                else if (modelList.Count == 1)
+                {
+                    // User went back on first additional model - cancel entirely
+                    cancelled = true;
+                    AnsiConsole.MarkupLine("[dim]Multi-model configuration cancelled.[/]");
+                    break;
+                }
+                // else: user went back but we have at least 2 models, just stop adding more
 
-                // Ask if they want to add another model
-                addMore = AnsiConsole.Confirm("[yellow]Add another model to the rotation?[/]", false);
+                if (!cancelled && modelList.Count > 1)
+                {
+                    // Ask if they want to add another model
+                    addMore = AnsiConsole.Confirm("[yellow]Add another model to the rotation?[/]", false);
+                }
+                else if (cancelled)
+                {
+                    break;
+                }
             }
         }
 
-        multiModelConfig = new MultiModelConfig
+        if (!cancelled)
         {
-            Strategy = strategy,
-            Models = modelList,
-            Verification = strategy == ModelSwitchStrategy.Verification
-                ? new VerificationConfig { VerifierIndex = modelList.Count - 1, Trigger = VerificationTrigger.CompletionSignal }
-                : null
-        };
+            multiModelConfig = new MultiModelConfig
+            {
+                Strategy = strategy,
+                Models = modelList,
+                Verification = strategy == ModelSwitchStrategy.Verification
+                    ? new VerificationConfig { VerifierIndex = modelList.Count - 1, Trigger = VerificationTrigger.CompletionSignal }
+                    : null
+            };
 
-        projectSettings.MultiModel = multiModelConfig;
+            projectSettings.MultiModel = multiModelConfig;
 
-        var modelNames = string.Join(" → ", modelList.Select(m => m.DisplayName));
-        AnsiConsole.MarkupLine($"[green]Multi-model:[/] {strategy} - {modelNames}");
+            var modelNames = string.Join(" → ", modelList.Select(m => m.DisplayName));
+            AnsiConsole.MarkupLine($"[green]Multi-model:[/] {strategy} - {modelNames}");
+        }
     }
 }
 else if (!freshMode && projectSettings.MultiModel?.IsEnabled == true)
