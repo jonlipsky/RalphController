@@ -468,15 +468,22 @@ public static class FinalVerification
         return $@"
 ---FINAL_VERIFICATION_REQUEST---
 
-You indicated that the task is complete. Before we finish, please perform a final verification:
+You indicated that the task is complete. Before we finish, please perform a STRICT final verification:
 
-1. Review each item in the implementation plan or task list
-2. For EACH item, verify it has been fully implemented:
+1. Review EVERY SINGLE item in the implementation plan or task list - not just high priority ones
+2. For EACH item, verify it has been FULLY implemented:
    - Check that the code exists and is correct
    - Verify tests pass (if applicable)
    - Confirm the feature works as expected
+   - If you haven't actually tested/verified it, it is NOT complete
 
-3. Report your findings in this EXACT format:
+3. Task status definitions (BE STRICT):
+   - [x] COMPLETE - Code written, tested, and verified working
+   - [?] NOT COMPLETE - Awaiting verification means YOU need to verify it NOW
+   - [ ] NOT COMPLETE - Not started or not finished
+   - Any task not marked [x] is INCOMPLETE
+
+4. Report your findings in this EXACT format:
 
 ---VERIFICATION_RESULT---
 OVERALL_STATUS: [COMPLETE or INCOMPLETE]
@@ -492,7 +499,12 @@ INCOMPLETE_TASKS:
 SUMMARY: [Brief summary of verification findings]
 ---END_VERIFICATION---
 
-If any tasks are INCOMPLETE, continue working on them. Only report COMPLETE if ALL tasks are truly finished.
+CRITICAL RULES:
+- Report INCOMPLETE if ANY task is not marked [x] in the plan
+- Tasks marked [?] are NOT complete - verify them now or mark as incomplete
+- Do NOT skip tasks because they are ""low priority"" or ""can be done later""
+- ALL tasks must be [x] complete before reporting OVERALL_STATUS: COMPLETE
+- If you find incomplete tasks, continue working on them instead of reporting COMPLETE
 {planSection}
 ";
     }
@@ -559,6 +571,50 @@ If any tasks are INCOMPLETE, continue working on them. Only report COMPLETE if A
         if (summaryMatch.Success)
         {
             result.Summary = summaryMatch.Groups[1].Value.Trim();
+        }
+
+        // STRICT VALIDATION: Override AllTasksComplete if we detect any incomplete indicators
+        // This prevents the AI from claiming COMPLETE when tasks are still pending
+
+        // Check 1: If AI listed any incomplete tasks, it's NOT complete (regardless of OVERALL_STATUS)
+        if (result.IncompleteTasks.Count > 0)
+        {
+            result.AllTasksComplete = false;
+        }
+
+        // Check 2: Scan the full output for [ ] or [?] markers which indicate incomplete/unverified tasks
+        var uncheckedTaskCount = Regex.Matches(output, @"\[\s*\]|\[\?\]").Count;
+        if (uncheckedTaskCount > 0)
+        {
+            result.AllTasksComplete = false;
+            if (result.IncompleteTasks.Count == 0)
+            {
+                result.IncompleteTasks.Add($"Found {uncheckedTaskCount} unchecked task marker(s) in output");
+            }
+        }
+
+        // Check 3: Look for phrases indicating incomplete work
+        var incompleteIndicators = new[] {
+            "not yet implemented", "not implemented", "needs implementation",
+            "todo", "to do", "still need", "remaining task", "pending",
+            "not started", "awaiting", "blocked", "waiting for"
+        };
+        foreach (var indicator in incompleteIndicators)
+        {
+            if (output.Contains(indicator, StringComparison.OrdinalIgnoreCase) &&
+                result.AllTasksComplete)
+            {
+                // Only flag if there's strong evidence - look for task-like context
+                var indicatorMatch = Regex.Match(output,
+                    $@"[-*]\s*\[.\].*{Regex.Escape(indicator)}",
+                    RegexOptions.IgnoreCase);
+                if (indicatorMatch.Success)
+                {
+                    result.AllTasksComplete = false;
+                    result.IncompleteTasks.Add($"Found incomplete indicator: '{indicator}' in task list");
+                    break;
+                }
+            }
         }
 
         // If no explicit incomplete tasks but status is incomplete, mark as incomplete
