@@ -264,7 +264,7 @@ public class ProjectScaffolder
 
                     ## Task Selection (IN THIS ORDER)
                     1. FIRST: Look for any `[?]` tasks - verify these before doing new work
-                    2. SECOND: If no `[?]` tasks, take the first `[ ]` task from High Priority
+                    2. SECOND: If no `[?]` tasks, pick an incomplete `[ ]` task (ALL tasks must be completed)
                     ```
 
                     REQUIRED RULES TO INCLUDE:
@@ -674,11 +674,11 @@ public class ProjectScaffolder
         ## Task Selection Algorithm
 
         1. Read IMPLEMENTATION_PLAN.md
-        2. Find first incomplete task (pending/in_progress, no blockers, highest priority)
+        2. Find an incomplete `[ ]` task (ALL tasks must be completed, not just high priority)
         3. If blocked, complete blocking task first
         4. Execute selected task
         5. Update plan
-        6. Loop
+        6. Loop until ALL tasks are `[x]` complete
 
         ## Build Commands
 
@@ -748,7 +748,7 @@ public class ProjectScaffolder
 
         ## Task Selection (IN THIS ORDER)
         1. **FIRST**: Look for any `[?]` tasks - verify these before doing new work
-        2. **SECOND**: If no `[?]` tasks, take the first `[ ]` task from High Priority
+        2. **SECOND**: If no `[?]` tasks, pick an incomplete `[ ]` task (ALL tasks must be completed)
 
         ## When You Find a `[?]` Task:
         1. Review the implementation thoroughly

@@ -80,11 +80,11 @@ public static class ScaffoldPrompts
         Include a numbered algorithm:
         ```
         1. Read IMPLEMENTATION_PLAN.md
-        2. Find first incomplete task (pending/in_progress, no blockers, highest priority)
+        2. Find an incomplete `[ ]` task (ALL tasks must eventually be completed, not just high priority)
         3. If blocked, complete blocking task first
         4. Execute selected task
         5. Update plan
-        6. Loop
+        6. Loop until ALL tasks are `[x]` complete
         ```
 
         ### 6. Subagent Communication Section
@@ -189,7 +189,7 @@ public static class ScaffoldPrompts
         - If INCOMPLETE: Mark as `[ ]` with a note explaining what's missing
 
         ### If no `[?]` tasks exist:
-        - Choose FIRST incomplete `[ ]` High Priority task
+        - Choose an incomplete `[ ]` task (ALL tasks must be completed, not just high priority)
         - Implement ONE thing completely
         - When done, mark as `[?]` (NOT `[x]`) - another agent must verify
         - Commit your work
