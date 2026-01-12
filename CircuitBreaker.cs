@@ -42,8 +42,10 @@ public class CircuitBreaker
     {
         lock (_lock)
         {
-            // Check for progress (file modifications)
-            if (filesModified > 0 || filesModified != _lastFileCount)
+            // Check for progress (file modifications OR successful completion)
+            // A successful iteration indicates progress even without file changes
+            // (e.g., status updates, analysis, verification runs)
+            if (result.Success || filesModified > 0 || filesModified != _lastFileCount)
             {
                 _noProgressCount = 0;
                 _lastFileCount = filesModified;
