@@ -84,9 +84,25 @@ public class AIProcess : IDisposable
         // Build arguments - some providers take prompt as argument, others via stdin
         var arguments = _providerConfig.Arguments;
         var useShell = false;
+        var useStdinRedirect = _providerConfig.UsesStdin;
 
         string? scriptFile = null;
-        if (_providerConfig.UsesPromptArgument)
+
+        // On Windows, stdin-based commands need to use temp file + input redirection
+        // because .cmd files don't work well with direct stdin piping
+        if (OperatingSystem.IsWindows() && _providerConfig.UsesStdin)
+        {
+            var tempFile = Path.GetTempFileName();
+            await File.WriteAllTextAsync(tempFile, prompt, cancellationToken);
+            _tempPromptFile = tempFile;
+
+            // Use shell with input redirection from temp file
+            var fullCmd = $"{_providerConfig.ExecutablePath} {arguments} < \"{tempFile}\"";
+            arguments = $"/c {fullCmd}";
+            useShell = true;
+            useStdinRedirect = false; // We're using file redirection instead
+        }
+        else if (_providerConfig.UsesPromptArgument)
         {
             // Write prompt to temp file and create a shell script to execute
             var tempFile = Path.GetTempFileName();
@@ -141,7 +157,7 @@ public class AIProcess : IDisposable
                 : _providerConfig.ExecutablePath,
             Arguments = arguments,
             WorkingDirectory = _config.TargetDirectory,
-            RedirectStandardInput = _providerConfig.UsesStdin,
+            RedirectStandardInput = useStdinRedirect,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -246,8 +262,8 @@ public class AIProcess : IDisposable
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
 
-            // Write prompt to stdin and close it (if provider uses stdin)
-            if (_providerConfig.UsesStdin)
+            // Write prompt to stdin and close it (if using stdin redirect)
+            if (useStdinRedirect)
             {
                 await _process.StandardInput.WriteAsync(prompt);
                 _process.StandardInput.Close();

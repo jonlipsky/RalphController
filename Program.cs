@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using System.Text;
 using RalphController;
 using RalphController.Models;
 using Spectre.Console;
+
+// Set console encoding to UTF-8 for proper Unicode character support on Windows
+Console.OutputEncoding = Encoding.UTF8;
 
 static string? NormalizeOpenCodeModel(string? model)
 {
