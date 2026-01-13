@@ -468,9 +468,36 @@ public static class FinalVerification
         return $@"
 ---FINAL_VERIFICATION_REQUEST---
 
-You indicated that the task is complete. Before we finish, please verify ALL tasks are done.
+You indicated that the task is complete. Before we finish, you must perform a FULL AUDIT.
 
-Review EVERY item in the implementation plan. Report ANY that are not fully complete.
+## AUDIT CHECKLIST - Complete ALL of these:
+
+### 1. Code Quality Audit
+Search the codebase for:
+- TODO comments (anything marked ""TODO"", ""FIXME"", ""HACK"", ""XXX"")
+- Stub implementations (empty methods, fake returns, placeholder code)
+- NotImplementedException or similar exception-based placeholders
+- Methods that return hardcoded dummy values
+
+### 2. Feature Completeness Audit
+- Read specs/* to understand ALL required features
+- Verify EACH feature from specs is actually implemented
+- Check that no feature is partially implemented or skipped
+
+### 3. Task Status Audit
+Review EVERY item in the implementation plan:
+- Tasks marked [?] are AWAITING VERIFICATION - they are NOT complete
+- Tasks marked [ ] are INCOMPLETE - they need work
+- Only [x] tasks are verified complete
+
+### 4. Test Coverage Audit
+- Check that all core functionality has tests
+- Look for untested edge cases or error paths
+
+## CRITICAL:
+- Do NOT claim completion if you find ANY issues above
+- Do NOT skip ""low priority"" tasks - ALL tasks must be done
+- [?] tasks need verification - they are NOT complete
 
 Report your findings in this EXACT format:
 
@@ -484,15 +511,28 @@ WAITING_VERIFICATION:
 - [Task marked [?] that needs verification]
 (Write ""None"" if no tasks are waiting)
 
+CODE_QUALITY_ISSUES:
+- [Stub code/TODO/incomplete implementation found]
+(Write ""None"" if code is production-ready)
+
 SUMMARY: [One line summary]
 ---END_VERIFICATION---
 
 RULES:
 - List ANY task not marked [x] under REMAINING_TASKS
 - List ANY task marked [?] under WAITING_VERIFICATION
-- Tasks marked [?] are NOT complete - they need verification
-- Do NOT skip ""low priority"" tasks - ALL tasks must be done
-- If you find ANY remaining or waiting tasks, list them and continue working
+- List ALL code quality issues found during audit
+- If you find ANY remaining tasks, waiting tasks, OR code issues, continue working
+
+## AFTER REPORTING YOUR FINDINGS:
+You MUST update implementation_plan.md to add tasks for any issues found:
+- Add new [ ] tasks for code quality issues (TODOs, stub code, missing features)
+- Move incomplete [ ] tasks to appropriate priority sections
+- Keep [?] tasks as [?] - they still need verification
+- Ensure every issue you found has a corresponding task in the plan
+
+Then commit the updated implementation_plan.md so the next iteration can continue the work.
+
 {planSection}
 ";
     }
@@ -550,6 +590,13 @@ RULES:
         foreach (var task in waitingTasks)
         {
             result.IncompleteTasks.Add($"[Waiting verification] {task}");
+        }
+
+        // Parse CODE_QUALITY_ISSUES
+        var qualityIssues = ParseTaskList("CODE_QUALITY_ISSUES");
+        foreach (var issue in qualityIssues)
+        {
+            result.IncompleteTasks.Add($"[Code quality] {issue}");
         }
 
         // Parse summary
