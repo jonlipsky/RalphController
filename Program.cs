@@ -53,18 +53,66 @@ static Task<List<string>> GetClaudeModels()
     return Task.FromResult(models);
 }
 
-static Task<List<string>> GetCodexModels()
+static async Task<List<string>> GetCodexModels()
 {
-    // Codex CLI uses --model or -m flag
-    // Common models include o3, o4-mini, etc.
-    var models = new List<string>
+    // Known Codex models from https://developers.openai.com/codex/models
+    var knownCodexModels = new List<string>
     {
-        "o3",               // OpenAI o3
-        "o4-mini",          // OpenAI o4-mini
-        "codex-1",          // Codex-1
-        "gpt-4.1"           // GPT-4.1
+        "gpt-5.2-codex",      // Most advanced agentic coding model
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex-mini",
+        "gpt-5.2",
+        "gpt-5.1",
+        "gpt-5.1-codex",
+        "gpt-5-codex",
+        "gpt-5-codex-mini",
+        "gpt-5"
     };
-    return Task.FromResult(models);
+
+    // Try to fetch models from OpenAI API and filter to relevant ones
+    try
+    {
+        var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+            var response = await client.GetStringAsync("https://api.openai.com/v1/models");
+            using var doc = System.Text.Json.JsonDocument.Parse(response);
+
+            if (doc.RootElement.TryGetProperty("data", out var dataArray))
+            {
+                var apiModels = new List<string>();
+                foreach (var model in dataArray.EnumerateArray())
+                {
+                    if (model.TryGetProperty("id", out var idElement))
+                    {
+                        var id = idElement.GetString();
+                        // Only include gpt-5, gpt-4, o3, o4, or codex models
+                        if (!string.IsNullOrEmpty(id) &&
+                            (id.StartsWith("gpt-5") || id.StartsWith("gpt-4") ||
+                             id.StartsWith("o3") || id.StartsWith("o4") ||
+                             id.Contains("codex")))
+                        {
+                            apiModels.Add(id);
+                        }
+                    }
+                }
+                if (apiModels.Count > 0)
+                {
+                    // Merge with known models (in case API is missing some)
+                    var allModels = new HashSet<string>(knownCodexModels);
+                    allModels.UnionWith(apiModels);
+                    var result = allModels.ToList();
+                    result.Sort();
+                    return result;
+                }
+            }
+        }
+    }
+    catch { /* Fall through to defaults */ }
+
+    return knownCodexModels;
 }
 
 static Task<List<string>> GetGeminiModels()
